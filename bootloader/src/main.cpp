@@ -21,6 +21,9 @@
 #include <Arduino.h>
 
 #include "app_header.h"
+#ifdef OTA_FLASH_SELFTEST
+#include "ota_flash_selftest.h"
+#endif
 
 namespace {
 
@@ -94,6 +97,12 @@ void setup() {
             Serial.print(CrashReport);
             Serial.println("------------------------------------------------");
       }
+
+#ifdef OTA_FLASH_SELFTEST
+      // Bring-up only: prove the RAM-resident flash layer against a scratch
+      // sector in the free region before trusting it to write the app slot.
+      ota_flash_selftest(Serial);
+#endif
 
       blink(3, 80, 80);
 
