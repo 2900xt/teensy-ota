@@ -1,0 +1,12 @@
+{
+  "name": "VigilOta",
+  "version": "0.1.0",
+  "description": "Shared Teensy OTA support for Vigil boards: the app_header contract placed at the slot base, the slot-A application linker script, and the resident bootloader project.",
+  "frameworks": ["arduino"],
+  "platforms": ["teensy"],
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src",
+    "libArchive": false
+  }
+}
