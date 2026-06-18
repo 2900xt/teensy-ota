@@ -21,9 +21,14 @@
 #include <Arduino.h>
 
 #include "app_header.h"
+#include "ota_crc32.h"
 #ifdef OTA_FLASH_SELFTEST
 #include "ota_flash_selftest.h"
 #endif
+
+// Slot A span (must match ld/app_slotA.ld FLASH LENGTH). Used to bound img_len
+// before the CRC walk so a corrupt header can never make us read past the slot.
+#define APP_SLOT_A_SIZE 0x00380000u // 3584 KiB
 
 namespace {
 
@@ -119,8 +124,32 @@ void setup() {
       }
 
       // Sanity: entry must point into the app slot.
-      if (hdr->entry < APP_SLOT_A_BASE || hdr->entry >= (APP_SLOT_A_BASE + 0x380000u)) {
+      if (hdr->entry < APP_SLOT_A_BASE || hdr->entry >= (APP_SLOT_A_BASE + APP_SLOT_A_SIZE)) {
             Serial.println("app entry out of slot range; refusing to jump");
+            return;
+      }
+
+      // Integrity: verify the stamped CRC32 before trusting the image. img_len
+      // and crc32 are written by stamp_header.py post-build; an un-stamped image
+      // (img_len == 0) fails this check and stays in the bootloader rather than
+      // jumping into a possibly-corrupt slot. Bound img_len to the slot first so
+      // a bad header can't walk the CRC past slot A.
+      const uint32_t img_len = hdr->img_len;
+      if (img_len < sizeof(app_header_t) || img_len > APP_SLOT_A_SIZE) {
+            Serial.printf("slot A img_len=%lu out of range [%u, %lu]; refusing to jump\n\r",
+                          static_cast<unsigned long>(img_len),
+                          static_cast<unsigned>(sizeof(app_header_t)),
+                          static_cast<unsigned long>(APP_SLOT_A_SIZE));
+            return;
+      }
+      const uint32_t want = hdr->crc32;
+      const uint32_t got = ota_app_image_crc(APP_SLOT_A_BASE, img_len);
+      Serial.printf("slot A img_len=%lu crc=%08lX (expected %08lX)\n\r",
+                    static_cast<unsigned long>(img_len),
+                    static_cast<unsigned long>(got),
+                    static_cast<unsigned long>(want));
+      if (got != want) {
+            Serial.println("slot A CRC mismatch; refusing to jump");
             return;
       }
 

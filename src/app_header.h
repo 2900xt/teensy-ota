@@ -10,9 +10,9 @@
  * bootloader reads it at a fixed address (APP_SLOT_A_BASE) to decide whether a
  * valid image is present and where to begin execution.
  *
- * Only `magic` and `entry` are consulted today (the boot handoff). `img_len`/
- * `crc32`/`version` are carried so the later OTA + rollback logic (CRC verify
- * before boot, version compare, slot selection) has a stable header to build on.
+ * `magic`/`entry` drive the boot handoff; `img_len`/`crc32` are stamped post-build
+ * by stamp_header.py and verified by the bootloader before every jump (M1, see
+ * ota_crc32). `version` is carried for the later rollback/slot-selection logic.
  */
 #ifndef BV_OTA_APP_HEADER_H
 #define BV_OTA_APP_HEADER_H

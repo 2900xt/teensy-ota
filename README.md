@@ -64,9 +64,16 @@ reached by a software branch. We keep **both** layouts:
   linker computes relative to it, so the unmodified startup copies from the slot.)
 - `ld/bootloader.ld` — bootloader linker script: stock Teensy 4.1 layout with
   FLASH bounded to the first 256 KiB so it can never overrun the app slot.
+- `src/ota_crc32.h` / `src/ota_crc32.c` — zlib/IEEE-802.3 CRC32 shared by the host
+  stamper and the device. `ota_app_image_crc()` hashes `[slot_base, slot_base+img_len)`
+  with the header's `crc32` field treated as zero — the convention the bootloader
+  uses to verify an image before jumping.
 - `bootloader/` — the resident bootloader (its own PlatformIO project, shared by
-  every firmware).
+  every firmware). Verifies the stamped slot-A CRC before the handoff.
 - `merge_hex.py` — combines bootloader + app images into one flashable file.
+- `stamp_header.py` — post-build step that stamps `img_len` + `crc32` into the
+  slot-A app header so the bootloader can verify integrity. Runs in place before
+  the merge (idempotent). Standalone: `stamp_header.py <in.hex> [out.hex] [--slot-base 0x...]`.
 
 ## Build & flash
 
@@ -78,6 +85,9 @@ The equivalent manual steps for a project at `core/<fw>`:
 ```sh
 # 1. application, linked at slot A
 pio run -d core/<fw> -e teensy41_slotA
+
+# 1b. stamp img_len + crc32 into the slot-A app header (in place, before merge)
+python3 common/ota/stamp_header.py core/<fw>/.pio/build/teensy41_slotA/firmware.hex
 
 # 2. shared resident bootloader (built once, reused by every firmware)
 pio run -d common/ota/bootloader

@@ -17,6 +17,10 @@ directly-bootable GOLDEN image** in a second flash slot.
   slot. Slot B holds an immutable factory GOLDEN image, **directly bootable** — on
   any failure the bootloader jumps to GOLDEN with zero flashing and no SD
   dependency on the recovery path.
+- **GOLDEN is never updatable at runtime.** It is written once at manufacturing
+  (external programmer / tycmd) and is hard-protected from every runtime flash
+  path — the `ota_flash` writable window itself excludes slot B (see below), so no
+  bug in the commit path can erase it. There is no OTA path that touches GOLDEN.
 - **Transport = generic SD file R/W over the serial console**, not a bespoke UDP
   OTA protocol. Firmware is staged as a normal file on SD, then "armed."
 - **Binary chunks** for the file body: a text header line + exactly `len` raw
@@ -28,16 +32,21 @@ directly-bootable GOLDEN image** in a second flash slot.
 
 | Region | Range | Size | Notes |
 |---|---|---|---|
-| Bootloader | `0x60000000–0x6003FFFF` | 256 KiB | ROM-booted, owns FCB/IVT. **See risk: may need 512 KiB for SdFat.** |
-| Slot A (OTA app) | `0x60040000–0x603BFFFF` | 3584 KiB | `app_slotA.ld`; OTA rewrites this only |
-| Slot B (GOLDEN) | `0x603C0000–0x6073FFFF` | 3584 KiB | `app_slotB.ld` (new); immutable factory image |
-| Spare | `0x60740000–0x607BFFFF` | 512 KiB | reserved |
+| Bootloader | `0x60000000–0x6003FFFF` | 256 KiB | ROM-booted, owns FCB/IVT. SdFat fits comfortably (see risks). |
+| Slot A (OTA app) | `0x60040000–0x603BFFFF` | 3584 KiB | `app_slotA.ld`; the only OTA-writable region |
+| Slot B (GOLDEN) | `0x603C0000–0x6073FFFF` | 3584 KiB | `app_slotB.ld` (new); immutable, never written at runtime |
+| Spare | `0x60740000–0x607BFFFF` | 512 KiB | reserved; flash self-test scratch lives here |
 | EEPROM emul. | `0x607C0000–0x607FFFFF` | 256 KiB | core-reserved (`FLASH_SECTORS=63`); boot-control state lives here |
 
-`ota_flash`'s writable-window guard is `[0x60040000, 0x607C0000)`, which already
-covers both slots and protects the bootloader and EEPROM region. (If slot B must
-be writable separately from slot A, the commit path range-checks per slot; the
-guard stays as the outer bound.)
+**`ota_flash` writable window excludes GOLDEN.** To make slot B physically
+unreachable from any runtime flash path, the guard is two disjoint ranges, not one:
+slot A `[0x60040000,0x603C0000)` and spare `[0x60740000,0x607C0000)`. Slot B and the
+bootloader and EEPROM are all outside it. The bootloader commit path additionally
+range-checks to slot A only; the self-test only ever touches the spare range.
+
+> **Required tweak (M2):** the self-test default scratch is currently
+> `0x603C0000`, which is now slot B. It must move into the spare range (e.g.
+> `0x60740000`) before slot B exists, or the bench test would erase GOLDEN.
 
 ## Components & status
 
@@ -46,7 +55,7 @@ guard stays as the outer bound.)
 | Handoff bootloader (jump to slot A) | `common/ota/bootloader` | done |
 | RAM-resident flash erase/write/verify | `common/ota/src/ota_flash.*` | done (needs hardware bench pass) |
 | Flash bench self-test | `common/ota/src/ota_flash_selftest.*` | done (needs hardware run) |
-| CRC32 + header stamping | build tool + `app_header` | **todo (M1)** |
+| CRC32 + header stamping | `stamp_header.py` + `ota_crc32` + bootloader verify | **done (M1)** |
 | GOLDEN slot B (link env + boot select) | `app_slotB.ld`, `teensy41_slotB`, bootloader | **todo (M2)** |
 | Boot-counter / `mark_healthy` / watchdog / rollback | EEPROM state + bootloader + app API | **todo (M3)** |
 | Bootloader SD mount + hex parse + commit | bootloader | **todo (M4)** |
@@ -105,8 +114,12 @@ crc32              // over the struct
 - `app_slotB.ld`: identical to `app_slotA.ld` but `FLASH ORIGIN = 0x603C0000`.
 - `teensy41_slotB` env: same source, `BV_OTA_SLOT_BUILD`, slot-B ldscript.
 - Manufacturing combined image = bootloader + slot-A image + slot-B image (extend
-  the merge to 3 inputs). Flash once via tycmd. Slot A is then OTA-updated; slot B
-  stays the factory baseline (factory-only updates for now).
+  the merge to 3 inputs). Flash once via tycmd. Slot A is then OTA-updated; **slot B
+  is immutable** — written only here, never by any runtime path.
+- Immutability is enforced, not just convention: the `ota_flash` writable window
+  excludes `[0x603C0000,0x60740000)`, so even a buggy commit can't erase GOLDEN.
+- Also move the self-test scratch out of slot B (now `0x603C0000`) into the spare
+  range (e.g. `0x60740000`).
 
 ## Serial SD file-transfer protocol (M5, binary chunks)
 
@@ -137,14 +150,19 @@ boots slot A → app `ota_mark_healthy()`.
 ## Milestones (build the safety net before the auto-writer, delivery last)
 
 - **M0 (done):** `ota_flash` + self-test. → *bench-verify on hardware.*
-- **M1:** CRC + header stamping; bootloader verifies slot A CRC before boot. Purely
-  additive, makes the current boot safer.
+- **M1 (done):** CRC + header stamping; bootloader verifies slot A CRC before boot.
+  Purely additive, makes the current boot safer. `stamp_header.py` fills `img_len`
+  + `crc32` into the slot-A hex post-build (wired into the OTA build before merge);
+  `ota_crc32` (zlib-compatible, shared host/device) backs both the stamper and the
+  bootloader's pre-jump verify. *Needs a hardware boot confirming valid-CRC jump
+  and corrupt-CRC refusal.*
 - **M2:** GOLDEN slot B (link env + ldscript + 3-way manufacturing merge) and
   dual-slot boot selection. Bench: blank/corrupt slot A → boots GOLDEN.
 - **M3:** EEPROM boot-control: counter + `ota_mark_healthy()` + watchdog + rollback.
   Bench: app that deliberately faults → rolls back to GOLDEN after `MAX_ATTEMPTS`.
-- **M4:** Bootloader SD mount + Intel-HEX parse + commit slot A via `ota_flash`.
-  Bench: hand-place a hex + set pending → reboot → commits + verifies.
+- **M4:** Bootloader SD mount (SdFat, FAT32-only config) + Intel-HEX parse +
+  commit slot A via `ota_flash`. Bench: hand-place a hex + set pending → reboot →
+  commits + verifies.
 - **M5:** Serial SD file transfer commands + raw chunk mode + host script. Bench:
   push a file, read back, CRC match.
 - **M6:** OTA arm/status/abort/reboot; full end-to-end OTA.
@@ -153,9 +171,12 @@ boots slot A → app `ota_mark_healthy()`.
 
 ## Risks / open questions
 
-- **SdFat in the 256 KiB bootloader.** SdFat + hex parse may not fit; if not, grow
-  the bootloader region to 512 KiB and move slot A to `0x60080000` (ripples into
-  both ldscripts + flash map). Verify the bootloader image size at M4.
+- **SdFat in the 256 KiB bootloader — resolved.** SdFat is small: ~9.8 KB flash /
+  ~875 B SRAM (FAT16/FAT32 only), ~13.8 KB (exFAT), ~19.3 KB (full). The bootloader
+  is ~40 KB today, so even full support stays well under 256 KiB. Use the
+  **FAT32-only** config (smallest) in the bootloader — confirm the deployed SD
+  cards are FAT32 (the apps use SdFat already; check their config). No need to grow
+  the bootloader region or move slot A.
 - **Slot size vs app size.** Confirm the real slot-A/B image fits well under
   3584 KiB.
 - **Commit interruptibility.** Power loss mid-commit leaves slot A partially
@@ -166,6 +187,6 @@ boots slot A → app `ota_mark_healthy()`.
   torn-write detection.
 - **Raw chunk mode vs line terminal** — echo/history/the UDP-diag reuse must not
   see the binary body; keep binary mode strictly serial.
-- **GOLDEN updatability** — factory-only for now; a future `OTA_ARM_GOLDEN` could
-  rewrite slot B, but that removes the immutable safety net unless double-buffered.
-```
+- **GOLDEN immutability — decided.** GOLDEN is never updatable at runtime; there is
+  no `OTA_ARM_GOLDEN`. It changes only via a full re-manufacture (external
+  programmer / tycmd). This keeps the safety net truly immutable.
