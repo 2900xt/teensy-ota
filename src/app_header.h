@@ -24,12 +24,17 @@
 
 // Flash map (Teensy 4.1, 8 MB QSPI mapped at 0x60000000).
 //   bootloader : 0x60000000 .. 0x6003FFFF  (256 KiB, owns the FCB/IVT boot header)
-//   app slot A : 0x60040000 ..             (the booted Vigil application)
+//   app slot A : 0x60040000 .. 0x603BFFFF  (3584 KiB, the OTA-updatable application)
+//   GOLDEN B   : 0x603C0000 .. 0x6073FFFF  (3584 KiB, immutable factory recovery image)
+// Slots A and B are the same size and link the SAME firmware; the bootloader boots
+// slot A when it is valid and falls back to GOLDEN slot B otherwise.
 // The default `teensy41` env still links the app at 0x60000000 for standalone
-// USB flashing / recovery / manufacturing; only the `teensy41_slotA` env uses
-// the slot layout below.
+// USB flashing / recovery / manufacturing; the `teensy41_slotA` / `teensy41_slotB`
+// envs use the slot layout below.
 #define BOOTLOADER_BASE 0x60000000u
 #define APP_SLOT_A_BASE 0x60040000u
+#define APP_SLOT_B_BASE 0x603C0000u // GOLDEN: immutable factory image, never written at runtime
+#define APP_SLOT_SIZE 0x00380000u   // 3584 KiB; both slots are identical in size
 
 typedef struct {
       uint32_t magic; // APP_HEADER_MAGIC when a valid image is present

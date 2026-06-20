@@ -14,9 +14,15 @@
  *   no valid app        -> slow 1 Hz heartbeat (stays in bootloader)
  *   app running          -> distinct double-blink (see the app's own main.cpp)
  *
+ * Dual-slot selection (M2): the bootloader boots slot A when it holds a valid,
+ * CRC-verified image, and otherwise falls back to the immutable GOLDEN image in
+ * slot B. GOLDEN is directly bootable — recovery needs no flashing and no SD. The
+ * richer boot-target / attempt-counter / rollback policy lands in M3; here the
+ * rule is simply "good slot A, else good GOLDEN, else stay in bootloader."
+ *
  * This bootloader is application-agnostic: it boots whichever Vigil firmware is
- * linked into slot A, so the same binary serves top-panel, GCS, and any other
- * Teensy firmware that builds a `*_slotA` image.
+ * linked into the slots, so the same binary serves top-panel, GCS, and any other
+ * Teensy firmware that builds `*_slotA` / `*_slotB` images.
  */
 #include <Arduino.h>
 
@@ -26,9 +32,9 @@
 #include "ota_flash_selftest.h"
 #endif
 
-// Slot A span (must match ld/app_slotA.ld FLASH LENGTH). Used to bound img_len
-// before the CRC walk so a corrupt header can never make us read past the slot.
-#define APP_SLOT_A_SIZE 0x00380000u // 3584 KiB
+// Slot span (APP_SLOT_SIZE, from app_header.h; matches both app_slotA.ld and
+// app_slotB.ld FLASH LENGTH). Used to bound img_len before the CRC walk so a
+// corrupt header can never make us read past the slot.
 
 namespace {
 
@@ -84,6 +90,54 @@ void blink(int n, int on_ms, int off_ms) {
       while (true) {} // unreachable
 }
 
+// Validate the app_header + stamped CRC at a slot base, streaming a one-line
+// report under `name`. Returns true iff the slot holds a bootable image: valid
+// magic, an entry pointing inside the slot, an in-range img_len, and a CRC that
+// matches the stamped value. Used for both slot A and GOLDEN slot B.
+bool slot_bootable(uint32_t slot_base, const char* name) {
+      const app_header_t* hdr = reinterpret_cast<const app_header_t*>(slot_base);
+      Serial.printf("%s @ %08lX  magic=%08lX  entry=%08lX  ver=%lu\n\r", name,
+                    static_cast<unsigned long>(slot_base),
+                    static_cast<unsigned long>(hdr->magic),
+                    static_cast<unsigned long>(hdr->entry),
+                    static_cast<unsigned long>(hdr->version));
+
+      if (hdr->magic != APP_HEADER_MAGIC) {
+            Serial.printf("  %s: no valid app image (bad magic)\n\r", name);
+            return false;
+      }
+
+      // Sanity: entry must point into this slot.
+      if (hdr->entry < slot_base || hdr->entry >= (slot_base + APP_SLOT_SIZE)) {
+            Serial.printf("  %s: entry out of slot range; refusing\n\r", name);
+            return false;
+      }
+
+      // Integrity: verify the stamped CRC32. img_len and crc32 are written by
+      // stamp_header.py post-build; an un-stamped image (img_len == 0) fails here.
+      // Bound img_len to the slot first so a bad header can't walk the CRC out of
+      // the slot.
+      const uint32_t img_len = hdr->img_len;
+      if (img_len < sizeof(app_header_t) || img_len > APP_SLOT_SIZE) {
+            Serial.printf("  %s: img_len=%lu out of range [%u, %lu]; refusing\n\r", name,
+                          static_cast<unsigned long>(img_len),
+                          static_cast<unsigned>(sizeof(app_header_t)),
+                          static_cast<unsigned long>(APP_SLOT_SIZE));
+            return false;
+      }
+      const uint32_t want = hdr->crc32;
+      const uint32_t got = ota_app_image_crc(slot_base, img_len);
+      Serial.printf("  %s: img_len=%lu crc=%08lX (expected %08lX)\n\r", name,
+                    static_cast<unsigned long>(img_len),
+                    static_cast<unsigned long>(got),
+                    static_cast<unsigned long>(want));
+      if (got != want) {
+            Serial.printf("  %s: CRC mismatch; refusing\n\r", name);
+            return false;
+      }
+      return true;
+}
+
 } // namespace
 
 void setup() {
@@ -111,52 +165,28 @@ void setup() {
 
       blink(3, 80, 80);
 
-      const app_header_t* hdr = reinterpret_cast<const app_header_t*>(APP_SLOT_A_BASE);
-      Serial.printf("slot A @ %08lX  magic=%08lX  entry=%08lX  ver=%lu\n\r",
-                    static_cast<unsigned long>(APP_SLOT_A_BASE),
-                    static_cast<unsigned long>(hdr->magic),
-                    static_cast<unsigned long>(hdr->entry),
-                    static_cast<unsigned long>(hdr->version));
+      // Prefer slot A (the OTA-updatable image); fall back to GOLDEN slot B (the
+      // immutable factory image) when slot A is blank, un-stamped, or corrupt.
+      uint32_t boot_base = 0;
+      if (slot_bootable(APP_SLOT_A_BASE, "slot A")) {
+            boot_base = APP_SLOT_A_BASE;
+      } else {
+            Serial.println("slot A not bootable; trying GOLDEN slot B...");
+            if (slot_bootable(APP_SLOT_B_BASE, "GOLDEN")) {
+                  boot_base = APP_SLOT_B_BASE;
+            }
+      }
 
-      if (hdr->magic != APP_HEADER_MAGIC) {
-            Serial.println("no valid app image in slot A; staying in bootloader");
+      if (boot_base == 0) {
+            Serial.println("no bootable image in either slot; staying in bootloader");
             return;
       }
 
-      // Sanity: entry must point into the app slot.
-      if (hdr->entry < APP_SLOT_A_BASE || hdr->entry >= (APP_SLOT_A_BASE + APP_SLOT_A_SIZE)) {
-            Serial.println("app entry out of slot range; refusing to jump");
-            return;
-      }
-
-      // Integrity: verify the stamped CRC32 before trusting the image. img_len
-      // and crc32 are written by stamp_header.py post-build; an un-stamped image
-      // (img_len == 0) fails this check and stays in the bootloader rather than
-      // jumping into a possibly-corrupt slot. Bound img_len to the slot first so
-      // a bad header can't walk the CRC past slot A.
-      const uint32_t img_len = hdr->img_len;
-      if (img_len < sizeof(app_header_t) || img_len > APP_SLOT_A_SIZE) {
-            Serial.printf("slot A img_len=%lu out of range [%u, %lu]; refusing to jump\n\r",
-                          static_cast<unsigned long>(img_len),
-                          static_cast<unsigned>(sizeof(app_header_t)),
-                          static_cast<unsigned long>(APP_SLOT_A_SIZE));
-            return;
-      }
-      const uint32_t want = hdr->crc32;
-      const uint32_t got = ota_app_image_crc(APP_SLOT_A_BASE, img_len);
-      Serial.printf("slot A img_len=%lu crc=%08lX (expected %08lX)\n\r",
-                    static_cast<unsigned long>(img_len),
-                    static_cast<unsigned long>(got),
-                    static_cast<unsigned long>(want));
-      if (got != want) {
-            Serial.println("slot A CRC mismatch; refusing to jump");
-            return;
-      }
-
-      Serial.println("valid app found; jumping to slot A...");
+      Serial.printf("valid app found; jumping to %08lX...\n\r",
+                    static_cast<unsigned long>(boot_base));
       Serial.flush();
       delay(50);
-      jump_to_app(APP_SLOT_A_BASE);
+      jump_to_app(boot_base);
 }
 
 void loop() {

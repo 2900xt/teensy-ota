@@ -22,12 +22,18 @@ void eepromemu_flash_erase_64K_block(void* addr);
 
 namespace {
 
+// Fully contained in [base, end)? Caller has already ruled out len==0 / wraparound.
+bool in_range(uint32_t addr, uint32_t len, uint32_t base, uint32_t end) {
+      return addr >= base && (addr + len) <= end;
+}
+
 bool in_writable_window(uint32_t addr, uint32_t len) {
       if (len == 0) return false;
-      if (addr < OTA_FLASH_WRITABLE_BASE) return false;
-      // Guard against wraparound, then bound the end.
-      if (addr + len < addr) return false;
-      return (addr + len) <= OTA_FLASH_WRITABLE_END;
+      if (addr + len < addr) return false; // wraparound
+      // Must fall entirely within ONE of the two disjoint ranges; a span that
+      // crosses GOLDEN (slot A -> spare) is rejected, which is what we want.
+      return in_range(addr, len, OTA_FLASH_SLOTA_BASE, OTA_FLASH_SLOTA_END) ||
+             in_range(addr, len, OTA_FLASH_SPARE_BASE, OTA_FLASH_SPARE_END);
 }
 
 } // namespace

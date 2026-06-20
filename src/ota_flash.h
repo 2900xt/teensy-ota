@@ -31,12 +31,20 @@
 #define OTA_FLASH_SECTOR_SIZE 4096u
 #define OTA_FLASH_PAGE_SIZE 256u
 
-// Writable window for OTA. The bootloader (below APP_SLOT_A_BASE) and the Teensy
-// core's emulated-EEPROM region (the top 63 sectors, base 0x607C0000) are off
-// limits — erasing either would brick boot or corrupt persisted settings.
-#define OTA_FLASH_WRITABLE_BASE APP_SLOT_A_BASE // 0x60040000
+// Writable window for OTA, expressed as two DISJOINT ranges so GOLDEN (slot B)
+// is physically unreachable from any runtime flash path: even a buggy commit
+// cannot erase the recovery image. Off-limits between/around them:
+//   - bootloader   (below APP_SLOT_A_BASE)          — erasing bricks boot
+//   - GOLDEN slot B [0x603C0000, 0x60740000)         — the immutable safety net
+//   - emulated EEPROM (top 63 sectors, 0x607C0000)   — persisted settings
+// Writable = slot A  [0x60040000, 0x603C0000)  OR  spare [0x60740000, 0x607C0000).
+#define OTA_FLASH_SLOTA_BASE APP_SLOT_A_BASE      // 0x60040000
+#define OTA_FLASH_SLOTA_END APP_SLOT_B_BASE       // 0x603C0000 (GOLDEN starts here)
+#define OTA_FLASH_GOLDEN_BASE APP_SLOT_B_BASE     // 0x603C0000 — never writable
+#define OTA_FLASH_GOLDEN_END 0x60740000u          // 0x60740000
+#define OTA_FLASH_SPARE_BASE OTA_FLASH_GOLDEN_END // 0x60740000 (self-test scratch lives here)
 #define OTA_FLASH_EEPROM_BASE 0x607C0000u
-#define OTA_FLASH_WRITABLE_END OTA_FLASH_EEPROM_BASE
+#define OTA_FLASH_SPARE_END OTA_FLASH_EEPROM_BASE // 0x607C0000
 
 #ifdef __cplusplus
 extern "C" {

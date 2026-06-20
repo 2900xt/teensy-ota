@@ -44,9 +44,9 @@ slot A `[0x60040000,0x603C0000)` and spare `[0x60740000,0x607C0000)`. Slot B and
 bootloader and EEPROM are all outside it. The bootloader commit path additionally
 range-checks to slot A only; the self-test only ever touches the spare range.
 
-> **Required tweak (M2):** the self-test default scratch is currently
-> `0x603C0000`, which is now slot B. It must move into the spare range (e.g.
-> `0x60740000`) before slot B exists, or the bench test would erase GOLDEN.
+> **Required tweak (done in M2):** the self-test default scratch moved from
+> `0x603C0000` (now slot B) into the spare range (`0x60740000`), so the bench
+> test can never erase GOLDEN.
 
 ## Components & status
 
@@ -54,9 +54,9 @@ range-checks to slot A only; the self-test only ever touches the spare range.
 |---|---|---|
 | Handoff bootloader (jump to slot A) | `common/ota/bootloader` | done |
 | RAM-resident flash erase/write/verify | `common/ota/src/ota_flash.*` | done (needs hardware bench pass) |
-| Flash bench self-test | `common/ota/src/ota_flash_selftest.*` | done (needs hardware run) |
+| Flash bench self-test | `common/ota/src/ota_flash_selftest.*` | done; scratch now `0x60740000` (M2) |
 | CRC32 + header stamping | `stamp_header.py` + `ota_crc32` + bootloader verify | **done (M1)** |
-| GOLDEN slot B (link env + boot select) | `app_slotB.ld`, `teensy41_slotB`, bootloader | **todo (M2)** |
+| GOLDEN slot B (link env + boot select) | `app_slotB.ld`, `teensy41_slotB`, bootloader | **done (M2)** |
 | Boot-counter / `mark_healthy` / watchdog / rollback | EEPROM state + bootloader + app API | **todo (M3)** |
 | Bootloader SD mount + hex parse + commit | bootloader | **todo (M4)** |
 | Serial SD file transfer commands | `serialTerminal` dispatch + host script | **todo (M5)** |
@@ -156,8 +156,13 @@ boots slot A → app `ota_mark_healthy()`.
   `ota_crc32` (zlib-compatible, shared host/device) backs both the stamper and the
   bootloader's pre-jump verify. *Needs a hardware boot confirming valid-CRC jump
   and corrupt-CRC refusal.*
-- **M2:** GOLDEN slot B (link env + ldscript + 3-way manufacturing merge) and
-  dual-slot boot selection. Bench: blank/corrupt slot A → boots GOLDEN.
+- **M2 (done):** GOLDEN slot B — `app_slotB.ld` (slot-A script with FLASH ORIGIN
+  `0x603C0000`), `teensy41_slotB` env (top-panel + GCS), dual-slot boot selection
+  in the bootloader (good slot A, else good GOLDEN, else stay), `ota_flash`
+  writable window split into two disjoint ranges that exclude GOLDEN, self-test
+  scratch moved to the spare range, and `merge_hex.py` extended to a variadic
+  (3-way) manufacturing merge. *Needs a hardware bench: blank/corrupt slot A →
+  boots GOLDEN; valid slot A → boots A.*
 - **M3:** EEPROM boot-control: counter + `ota_mark_healthy()` + watchdog + rollback.
   Bench: app that deliberately faults → rolls back to GOLDEN after `MAX_ATTEMPTS`.
 - **M4:** Bootloader SD mount (SdFat, FAT32-only config) + Intel-HEX parse +
