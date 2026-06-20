@@ -32,7 +32,7 @@ MANUFACTURING_HEX := $(BUILD_DIR)/manufacturing.hex
 STAMP := $(PYTHON) scripts/stamp_header.py
 MERGE := $(PYTHON) scripts/merge_hex.py
 
-.PHONY: all bootloader app golden ota manufacturing flash flash-manufacturing clean
+.PHONY: all bootloader app golden ota manufacturing flash flash-manufacturing compiledb clean
 
 all: ota
 
@@ -67,6 +67,18 @@ flash-manufacturing: manufacturing
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
+
+# Regenerate bootloader/compile_commands.json and .clangd for IDE/clangd.
+compiledb:
+	$(PIO) run -t compiledb -d bootloader
+	@printf '%s\n' \
+	  'CompileFlags:' \
+	  '  CompilationDatabase: bootloader' \
+	  '  Add:' \
+	  '    - --target=arm-none-eabi' \
+	  "    - --gcc-toolchain=$$HOME/.platformio/packages/toolchain-gccarmnoneeabi-teensy" \
+	  "    - -isystem$$HOME/.platformio/packages/toolchain-gccarmnoneeabi-teensy/arm-none-eabi/include" \
+	  > .clangd
 
 clean:
 	rm -rf $(BUILD_DIR) bootloader/.pio $(APP_DIR)/.pio

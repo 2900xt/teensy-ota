@@ -12,8 +12,18 @@ __pycache__/
 .idea/
 .DS_Store
 
+# IDE compilation database (machine-specific paths; run `make compiledb`)
+compile_commands.json
+**/compile_commands.json
+
 # Build artifacts
 *.elf
 *.hex
 *.bin
 *.map
+
+*/.cache
+
+# Local planning notes
+OTA_PLAN.md
+.clangd

@@ -8,8 +8,8 @@
 
 #include "ota_flash.h"
 
-#include <Arduino.h>
-#include <string.h>
+#include <Print.h>
+#include <time.h>
 
 namespace {
 
@@ -39,7 +39,7 @@ bool step(Print& out, const char* name, int rc) {
 
 bool ota_flash_selftest(Print& out, uint32_t scratch_addr) {
       static uint8_t pattern[kPatternLen];
-      fill_pattern(pattern, kPatternLen, micros());
+      fill_pattern(pattern, kPatternLen, time(NULL));
 
       out.println("=== OTA flash self-test ===");
       out.printf("scratch sector @ %08lX  (%lu-byte pattern)\n\r", static_cast<unsigned long>(scratch_addr), static_cast<unsigned long>(kPatternLen));
