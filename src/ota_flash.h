@@ -1,6 +1,6 @@
 /*
- * Copyright BlueVigil LLC 2026
- * All rights reserved
+ * Copyright (c) 2026 Taha Rawjani
+ * SPDX-License-Identifier: MIT
  *
  * RAM-resident QSPI flash erase/program/verify for Teensy 4.1 (i.MX RT1062 +
  * W25Q64 NOR). This is the low-level layer the OTA bootloader uses to write a
@@ -19,8 +19,8 @@
  * Geometry (W25Q64JV): 8 MiB, 4 KiB sectors, 32K/64K erase blocks, 256-byte
  * program pages. All addresses are absolute (0x60000000-based).
  */
-#ifndef BV_OTA_FLASH_H
-#define BV_OTA_FLASH_H
+#ifndef TEENSY_OTA_FLASH_H
+#define TEENSY_OTA_FLASH_H
 
 #include <stdint.h>
 
@@ -78,4 +78,4 @@ int ota_flash_is_erased(uint32_t addr, uint32_t len);
 }
 #endif
 
-#endif // BV_OTA_FLASH_H
+#endif // TEENSY_OTA_FLASH_H

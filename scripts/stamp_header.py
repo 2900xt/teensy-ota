@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Stamp img_len + crc32 into a slot-linked Vigil application's Intel-HEX (M1).
+"""Stamp img_len + crc32 into a slot-linked application's Intel-HEX (M1).
 
 A `*_slotA` (or later `*_slotB`) build emits an app_header at the slot base with
-img_len/crc32 left as 0 (see common/ota/src/app_header.cpp). This post-build step
-fills them in so the bootloader can verify image integrity before jumping:
+img_len/crc32 left as 0 (see src/app_header.cpp). This post-build step fills them
+in so the bootloader can verify image integrity before jumping:
 
   img_len = (highest byte address in the image) - slot_base + 1
   crc32   = CRC32 over [slot_base, slot_base + img_len), with the 4-byte crc32
@@ -30,8 +30,8 @@ import argparse
 import sys
 import zlib
 
-# Must match APP_HEADER_MAGIC and APP_SLOT_A_BASE in common/ota/src/app_header.h.
-APP_HEADER_MAGIC = 0x42564150  # 'BVAP', little-endian
+# Must match APP_HEADER_MAGIC and APP_SLOT_A_BASE in src/app_header.h.
+APP_HEADER_MAGIC = 0x4F544150  # 'OTAP', little-endian
 DEFAULT_SLOT_BASE = 0x60040000
 
 # Byte offsets within app_header_t (5x uint32, little-endian).

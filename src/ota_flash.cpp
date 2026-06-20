@@ -1,6 +1,6 @@
 /*
- * Copyright BlueVigil LLC 2026
- * All rights reserved
+ * Copyright (c) 2026 Taha Rawjani
+ * SPDX-License-Identifier: MIT
  *
  * Implementation of the RAM-resident QSPI flash layer. See ota_flash.h.
  */

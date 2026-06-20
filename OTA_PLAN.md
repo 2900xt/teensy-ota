@@ -1,4 +1,4 @@
-# Vigil OTA — design & implementation plan
+# teensy-ota — design & implementation plan
 
 Status: **plan**. The only code that exists today is the handoff bootloader and the
 RAM-resident flash layer (`ota_flash`, with bench self-test). Everything below is
@@ -52,9 +52,9 @@ range-checks to slot A only; the self-test only ever touches the spare range.
 
 | Component | Where | Status |
 |---|---|---|
-| Handoff bootloader (jump to slot A) | `common/ota/bootloader` | done |
-| RAM-resident flash erase/write/verify | `common/ota/src/ota_flash.*` | done (needs hardware bench pass) |
-| Flash bench self-test | `common/ota/src/ota_flash_selftest.*` | done; scratch now `0x60740000` (M2) |
+| Handoff bootloader (jump to slot A) | `bootloader/` | done |
+| RAM-resident flash erase/write/verify | `src/ota_flash.*` | done (needs hardware bench pass) |
+| Flash bench self-test | `src/ota_flash_selftest.*` | done; scratch now `0x60740000` (M2) |
 | CRC32 + header stamping | `stamp_header.py` + `ota_crc32` + bootloader verify | **done (M1)** |
 | GOLDEN slot B (link env + boot select) | `app_slotB.ld`, `teensy41_slotB`, bootloader | **done (M2)** |
 | Boot-counter / `mark_healthy` / watchdog / rollback | EEPROM state + bootloader + app API | **todo (M3)** |
@@ -112,7 +112,7 @@ crc32              // over the struct
 ## GOLDEN slot B (M2)
 
 - `app_slotB.ld`: identical to `app_slotA.ld` but `FLASH ORIGIN = 0x603C0000`.
-- `teensy41_slotB` env: same source, `BV_OTA_SLOT_BUILD`, slot-B ldscript.
+- `teensy41_slotB` env: same source, `TEENSY_OTA_SLOT_BUILD`, slot-B ldscript.
 - Manufacturing combined image = bootloader + slot-A image + slot-B image (extend
   the merge to 3 inputs). Flash once via tycmd. Slot A is then OTA-updated; **slot B
   is immutable** — written only here, never by any runtime path.
@@ -157,7 +157,7 @@ boots slot A → app `ota_mark_healthy()`.
   bootloader's pre-jump verify. *Needs a hardware boot confirming valid-CRC jump
   and corrupt-CRC refusal.*
 - **M2 (done):** GOLDEN slot B — `app_slotB.ld` (slot-A script with FLASH ORIGIN
-  `0x603C0000`), `teensy41_slotB` env (top-panel + GCS), dual-slot boot selection
+  `0x603C0000`), `teensy41_slotB` env, dual-slot boot selection
   in the bootloader (good slot A, else good GOLDEN, else stay), `ota_flash`
   writable window split into two disjoint ranges that exclude GOLDEN, self-test
   scratch moved to the spare range, and `merge_hex.py` extended to a variadic

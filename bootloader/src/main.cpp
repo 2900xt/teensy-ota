@@ -1,6 +1,6 @@
 /*
- * Copyright BlueVigil LLC 2026
- * All rights reserved
+ * Copyright (c) 2026 Taha Rawjani
+ * SPDX-License-Identifier: MIT
  *
  * OTA boot prototype - resident bootloader.
  *
@@ -20,9 +20,9 @@
  * richer boot-target / attempt-counter / rollback policy lands in M3; here the
  * rule is simply "good slot A, else good GOLDEN, else stay in bootloader."
  *
- * This bootloader is application-agnostic: it boots whichever Vigil firmware is
- * linked into the slots, so the same binary serves top-panel, GCS, and any other
- * Teensy firmware that builds `*_slotA` / `*_slotB` images.
+ * This bootloader is application-agnostic: it boots whichever firmware is linked
+ * into the slots, so the same binary serves any Teensy firmware that builds
+ * `*_slotA` / `*_slotB` images.
  */
 #include <Arduino.h>
 

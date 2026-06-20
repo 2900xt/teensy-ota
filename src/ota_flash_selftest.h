@@ -1,6 +1,6 @@
 /*
- * Copyright BlueVigil LLC 2026
- * All rights reserved
+ * Copyright (c) 2026 Taha Rawjani
+ * SPDX-License-Identifier: MIT
  *
  * Destructive bench self-test for the RAM-resident flash layer (ota_flash). It
  * erase/program/verify cycles a scratch sector in the SPARE flash region
@@ -13,8 +13,8 @@
  * Intended for bring-up: call once from a build that defines OTA_FLASH_SELFTEST.
  * Do NOT ship it on a normal boot path — it erases flash every time it runs.
  */
-#ifndef BV_OTA_FLASH_SELFTEST_H
-#define BV_OTA_FLASH_SELFTEST_H
+#ifndef TEENSY_OTA_FLASH_SELFTEST_H
+#define TEENSY_OTA_FLASH_SELFTEST_H
 
 #include <stdint.h>
 
@@ -25,4 +25,4 @@ class Print;
 // to `out`. Returns true on full pass.
 bool ota_flash_selftest(Print& out, uint32_t scratch_addr = 0x60740000u);
 
-#endif // BV_OTA_FLASH_SELFTEST_H
+#endif // TEENSY_OTA_FLASH_SELFTEST_H

@@ -1,6 +1,6 @@
 /*
- * Copyright BlueVigil LLC 2026
- * All rights reserved
+ * Copyright (c) 2026 Taha Rawjani
+ * SPDX-License-Identifier: MIT
  *
  * CRC32 for the OTA image-integrity contract (M1). This is the standard
  * IEEE 802.3 / zlib CRC32 (reflected, polynomial 0xEDB88320, init 0xFFFFFFFF,
@@ -15,8 +15,8 @@
  * the same when it recomputes — hence this shared helper rather than a raw CRC
  * over the literal flash bytes.
  */
-#ifndef BV_OTA_CRC32_H
-#define BV_OTA_CRC32_H
+#ifndef TEENSY_OTA_CRC32_H
+#define TEENSY_OTA_CRC32_H
 
 #include <stdint.h>
 
@@ -43,4 +43,4 @@ uint32_t ota_app_image_crc(uint32_t slot_base, uint32_t img_len);
 }
 #endif
 
-#endif // BV_OTA_CRC32_H
+#endif // TEENSY_OTA_CRC32_H

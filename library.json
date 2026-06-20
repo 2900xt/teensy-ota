@@ -1,7 +1,9 @@
 {
-  "name": "VigilOta",
+  "name": "teensy-ota",
   "version": "0.1.0",
-  "description": "Shared Teensy OTA support for Vigil boards: the app_header contract placed at the slot base, the slot-A application linker script, and the resident bootloader project.",
+  "description": "Custom PlatformIO bootloader library for Teensy 4.1 boards, enabling OTA firmware updates via serial, Ethernet, or other interfaces.",
+  "license": "MIT",
+  "authors": [{ "name": "Taha Rawjani" }],
   "frameworks": ["arduino"],
   "platforms": ["teensy"],
   "build": {

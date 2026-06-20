@@ -1,9 +1,9 @@
 /*
- * Copyright BlueVigil LLC 2026
- * All rights reserved
+ * Copyright (c) 2026 Taha Rawjani
+ * SPDX-License-Identifier: MIT
  *
- * Shared contract between the resident bootloader and a Vigil application image
- * (top-panel, GCS, or any other Teensy firmware that builds a slot-A image).
+ * Shared contract between the resident bootloader and an application image
+ * (any Teensy firmware that builds a slot-A image).
  *
  * The application places one app_header_t at the very base of its flash slot
  * (section ".appheader", forced to the slot ORIGIN by ld/app_slotA.ld). The
@@ -14,13 +14,13 @@
  * by stamp_header.py and verified by the bootloader before every jump (M1, see
  * ota_crc32). `version` is carried for the later rollback/slot-selection logic.
  */
-#ifndef BV_OTA_APP_HEADER_H
-#define BV_OTA_APP_HEADER_H
+#ifndef TEENSY_OTA_APP_HEADER_H
+#define TEENSY_OTA_APP_HEADER_H
 
 #include <stdint.h>
 
-// 'BVAP' (BlueVigil APplication), little-endian.
-#define APP_HEADER_MAGIC 0x42564150u
+// 'OTAP' (OTA aPplication), little-endian.
+#define APP_HEADER_MAGIC 0x4F544150u
 
 // Flash map (Teensy 4.1, 8 MB QSPI mapped at 0x60000000).
 //   bootloader : 0x60000000 .. 0x6003FFFF  (256 KiB, owns the FCB/IVT boot header)
@@ -44,4 +44,4 @@ typedef struct {
       uint32_t version; // monotonic firmware version
 } app_header_t;
 
-#endif // BV_OTA_APP_HEADER_H
+#endif // TEENSY_OTA_APP_HEADER_H
