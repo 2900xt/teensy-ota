@@ -1,0 +1,19 @@
+# PlatformIO build output
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Build artifacts
+*.elf
+*.hex
+*.bin
+*.map
