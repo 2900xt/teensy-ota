@@ -41,8 +41,7 @@ wraps the build → stamp → merge → flash pipeline and drives the example by
 pass `APP_DIR=<path>` for your own firmware.
 
 ```sh
-make flash                       # build + stamp + merge + upload OTA image
-make ota                         # -> build/ota.hex (no flash)
+make flash                       # build + stamp + merge + upload bootloader test image
 make manufacturing               # + GOLDEN slot B -> build/manufacturing.hex
 make ota APP_DIR=../my-firmware  # use your firmware instead of the example
 ```

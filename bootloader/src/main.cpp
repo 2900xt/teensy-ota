@@ -25,9 +25,12 @@
  * `*_slotA` / `*_slotB` images.
  */
 #include <Arduino.h>
+#include <limits.h>
 
 #include "app_header.h"
+#include "ota_boot_state.h"
 #include "ota_crc32.h"
+#include "ota_wdog.h"
 #ifdef OTA_FLASH_SELFTEST
 #include "ota_flash_selftest.h"
 #endif
@@ -165,31 +168,78 @@ void setup() {
 
       blink(3, 80, 80);
 
-      // Prefer slot A (the OTA-updatable image); fall back to GOLDEN slot B (the
-      // immutable factory image) when slot A is blank, un-stamped, or corrupt.
-      uint32_t boot_base = 0;
-      if (slot_bootable(APP_SLOT_A_BASE, "slot A")) {
-            boot_base = APP_SLOT_A_BASE;
+      // Reset-source decode: WDOG1_WRSR latches why the chip last reset. TOUT means
+      // the rollback watchdog fired (a hung slot-A app), which is the definitive
+      // signal that the M3 hang path worked. Read with the gate on (it is enabled in
+      // ota_wdog_arm, but ensure it here for a cold boot that never armed).
+      CCM_CCGR3 |= CCM_CCGR3_WDOG1(CCM_CCGR_ON);
+      const uint16_t wrsr = WDOG1_WRSR;
+      Serial.printf("reset source (WDOG1_WRSR=%04X): %s%s%s\n\r", wrsr,
+                    (wrsr & WDOG_WRSR_POR) ? "power-on " : "",
+                    (wrsr & WDOG_WRSR_TOUT) ? "WATCHDOG-TIMEOUT " : "",
+                    (wrsr & WDOG_WRSR_SFTW) ? "software " : "");
+
+      // Boot-control state (M3): persisted in emulated EEPROM, drives attempt-
+      // counted rollback. Defaults (target=A, attempts=0) if blank/torn.
+      ota_boot_state_t st;
+      ota_boot_state_load(&st);
+      Serial.printf("boot-control: target=%s attempts=%u/%u healthy=%u pending=%u last_commit=%u\n\r",
+                    st.boot_target == OTA_BOOT_TARGET_GOLDEN ? "GOLDEN" : "A",
+                    st.slotA_attempts, OTA_BOOT_MAX_ATTEMPTS, st.slotA_healthy, st.ota_pending,
+                    st.last_commit_result);
+
+      // M4 will apply a pending SD-staged update here (before slot selection),
+      // clearing ota_pending and resetting the attempt counter on success.
+
+      const bool a_ok = slot_bootable(APP_SLOT_A_BASE, "slot A");
+
+      // Boot slot A only if it is the chosen target, still has attempts left, and
+      // holds a valid image. Arm rollback before the jump: increment the persisted
+      // attempt counter (so a crash/hang that never reaches ota_mark_healthy()
+      // leaves the increment behind) and start the watchdog, which spans the
+      // branch into the app and resets the chip if the app hangs.
+      if (st.boot_target == OTA_BOOT_TARGET_A && st.slotA_attempts < OTA_BOOT_MAX_ATTEMPTS && a_ok) {
+            st.slotA_attempts++;
+            ota_boot_state_save(&st);
+            ota_wdog_arm(OTA_WDOG_DEFAULT_TIMEOUT_MS);
+            Serial.printf("booting slot A (attempt %u/%u), watchdog armed %u ms; jumping to %08lX...\n\r",
+                          st.slotA_attempts, OTA_BOOT_MAX_ATTEMPTS, OTA_WDOG_DEFAULT_TIMEOUT_MS,
+                          static_cast<unsigned long>(APP_SLOT_A_BASE));
+            Serial.flush();
+            delay(50);
+            jump_to_app(APP_SLOT_A_BASE);
+      }
+
+      // Falling back to GOLDEN. If slot A is the target and a valid image but has
+      // simply burned through its attempts, make GOLDEN sticky so we stop retrying
+      // a bad image; a new OTA commit (M4) clears this. A merely invalid/blank
+      // slot A is NOT made sticky, so a future valid flash can boot it.
+      if (st.boot_target == OTA_BOOT_TARGET_A && st.slotA_attempts >= OTA_BOOT_MAX_ATTEMPTS) {
+            Serial.printf("slot A reached %u attempts without mark_healthy; rolling back to GOLDEN\n\r",
+                          OTA_BOOT_MAX_ATTEMPTS);
+            st.boot_target = OTA_BOOT_TARGET_GOLDEN;
+            ota_boot_state_save(&st);
+      } else if (st.boot_target == OTA_BOOT_TARGET_GOLDEN) {
+            Serial.println("boot_target is GOLDEN (sticky rollback); booting recovery image");
       } else {
-            Serial.println("slot A not bootable; trying GOLDEN slot B...");
-            if (slot_bootable(APP_SLOT_B_BASE, "GOLDEN")) {
-                  boot_base = APP_SLOT_B_BASE;
-            }
+            Serial.println("slot A not bootable; falling back to GOLDEN slot B...");
       }
 
-      if (boot_base == 0) {
-            Serial.println("no bootable image in either slot; staying in bootloader");
-            return;
+      // GOLDEN is the safety net: directly bootable, never attempt-counted, never
+      // watchdog-armed (there is nothing further to roll back to).
+      if (slot_bootable(APP_SLOT_B_BASE, "GOLDEN")) {
+            Serial.printf("jumping to GOLDEN %08lX...\n\r",
+                          static_cast<unsigned long>(APP_SLOT_B_BASE));
+            Serial.flush();
+            delay(50);
+            jump_to_app(APP_SLOT_B_BASE);
       }
 
-      Serial.printf("valid app found; jumping to %08lX...\n\r",
-                    static_cast<unsigned long>(boot_base));
-      Serial.flush();
-      delay(50);
-      jump_to_app(boot_base);
+      Serial.println("no bootable image (slot A unavailable and GOLDEN invalid); staying in bootloader");
+      return;
 }
 
 void loop() {
-      // Only reached when no valid app is present: slow heartbeat.
-      blink(1, 1000, 1000);
+      // Only reached when no valid app is present. light up the LED as an error.
+      blink(1, INT_MAX, 1000);
 }

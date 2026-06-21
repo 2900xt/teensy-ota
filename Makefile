@@ -50,20 +50,15 @@ golden:
 	$(PIO) run -d $(APP_DIR) -e teensy41_slotB
 	$(STAMP) $(APP_SLOTB_HEX) --slot-base $(GOLDEN_BASE)
 
-# OTA image: bootloader + stamped slot-A app. The Teensy loader erases the whole
-# chip, so the two disjoint images are merged and flashed together.
-ota: bootloader app | $(BUILD_DIR)
-	$(MERGE) $(BOOTLOADER_HEX) $(APP_SLOTA_HEX) $(OTA_HEX)
-
 # Manufacturing image: bootloader + slot-A app + GOLDEN slot-B app.
 manufacturing: bootloader app golden | $(BUILD_DIR)
 	$(MERGE) $(BOOTLOADER_HEX) $(APP_SLOTA_HEX) $(APP_SLOTB_HEX) $(MANUFACTURING_HEX)
 
-flash: ota
+flash: manufacturing
 	$(TYCMD) upload $(OTA_HEX)
 
-flash-manufacturing: manufacturing
-	$(TYCMD) upload $(MANUFACTURING_HEX)
+test: flash
+	minicom -D /dev/ttyACM0 -b 115200
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
