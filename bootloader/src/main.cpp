@@ -183,6 +183,15 @@ void setup() {
       // counted rollback. Defaults (target=A, attempts=0) if blank/torn.
       ota_boot_state_t st;
       ota_boot_state_load(&st);
+#ifdef OTA_RESET_BOOT_STATE
+      // Bench helper: force the boot-control state back to defaults (target=A,
+      // attempts=0, not sticky-GOLDEN). A raw tycmd upload preserves the emulated
+      // EEPROM, so without this a prior rollback leaves boot_target=GOLDEN stuck.
+      // Flash once with this defined to clear state, then rebuild without it.
+      ota_boot_state_default(&st);
+      ota_boot_state_save(&st);
+      Serial.println("OTA_RESET_BOOT_STATE: boot-control cleared to defaults (target=A, attempts=0)");
+#endif
       Serial.printf("boot-control: target=%s attempts=%u/%u healthy=%u pending=%u last_commit=%u\n\r",
                     st.boot_target == OTA_BOOT_TARGET_GOLDEN ? "GOLDEN" : "A",
                     st.slotA_attempts, OTA_BOOT_MAX_ATTEMPTS, st.slotA_healthy, st.ota_pending,
