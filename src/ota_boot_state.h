@@ -26,7 +26,7 @@
 
 // 'OTBS' (OTa Boot State), little-endian.
 #define OTA_BOOT_STATE_MAGIC 0x4F544253u
-#define OTA_BOOT_STATE_VERSION 1u
+#define OTA_BOOT_STATE_VERSION 2u
 
 // Byte offset of the boot-control struct within the emulated EEPROM. Kept at 0;
 // nothing else in this project uses EEPROM, and the struct is only 16 bytes.
@@ -39,8 +39,11 @@
 // rollback after this many tries.
 #define OTA_BOOT_MAX_ATTEMPTS 3u
 
-// Which image the bootloader should run. GOLDEN is sticky once selected by a
-// rollback and is only cleared when a new OTA image is committed.
+// Which image the bootloader should run. GOLDEN is the failsafe, sticky once
+// selected and only cleared when a new OTA image is committed. Note a slot-A
+// attempt-rollback first reverts to the previous flashed image (re-flashed from
+// the SD commit history) and only falls through to GOLDEN if that revert is
+// unavailable or itself fails. See slotA_reverted.
 typedef enum {
       OTA_BOOT_TARGET_A = 0,      // slot A, the OTA-updatable image
       OTA_BOOT_TARGET_GOLDEN = 1, // slot B, the immutable factory recovery image
@@ -67,7 +70,10 @@ typedef struct {
       uint8_t slotA_healthy;      // set by app via ota_mark_healthy() once stable
       uint8_t ota_pending;        // an armed update is staged on SD
       uint8_t last_commit_result; // ota_commit_result_t
-      uint8_t reserved;           // pad to keep crc32 4-byte aligned; must be 0
+      uint8_t slotA_reverted;     // set after a one-shot revert to the previous
+                                  // flashed image; cleared by a new commit. Stops
+                                  // a second revert (the recovery image failing
+                                  // falls through to GOLDEN instead).
       uint32_t crc32;             // CRC32 over the preceding 12 bytes
 } ota_boot_state_t;
 

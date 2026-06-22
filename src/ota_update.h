@@ -7,25 +7,38 @@
  * the SD card, and the bootloader programs it into slot A on the next reset (see
  * bootloader/src/ota_commit.*). The app itself never writes the app flash slot.
  *
- * `ota_arm_update` records the file's path, CRC32 and length in the pending
- * descriptor `/ota/pending.txt` and sets the `ota_pending` flag (ota_boot_state.h);
- * the bootloader re-verifies the file against that CRC/length before erasing slot
- * A. `ota_inspect_file` is a no-flash dry run that reports what an image looks
- * like (CRC/length, header, address range) so a tool/UI can vet it before arming.
+ * `ota_arm_update` records the file's path, CRC32, length and a caller-supplied
+ * timestamp in the pending descriptor `/ota/pending.txt` and sets the `ota_pending`
+ * flag (ota_boot_state.h); the bootloader re-verifies the file against that
+ * CRC/length before erasing slot A, and on a successful commit logs the timestamp
+ * and image in the commit history (`/ota/commits.csv`). `ota_inspect_file` is a
+ * no-flash dry run that reports what an image looks like (CRC/length, header,
+ * address range) so a tool/UI can vet it before arming.
  *
- * The pending-descriptor path/format is a cross-component contract with the
- * bootloader commit path; keep them in sync.
+ * The pending-descriptor path/format and the commit-history CSV are cross-component
+ * contracts with the bootloader commit path; keep them in sync.
  */
 #ifndef TEENSY_OTA_UPDATE_H
 #define TEENSY_OTA_UPDATE_H
 
 #include <stdint.h>
 
-// Pending-update descriptor on the SD card. Three positional lines:
+// Pending-update descriptor on the SD card. Four positional lines:
 //   line 1: path to the staged slot-A Intel-HEX (e.g. /ota/app.hex)
 //   line 2: CRC32 of that file's raw bytes (hex)
 //   line 3: length of that file in bytes (decimal)
+//   line 4: caller-supplied commit timestamp (decimal; Unix epoch seconds, 0 if
+//           unknown) — logged into the commit history on a successful commit.
 #define OTA_PENDING_TXT_PATH "/ota/pending.txt"
+
+// Commit history on the SD card. A header line followed by one row per image the
+// bootloader has successfully committed, oldest first:
+//   timestamp,path,crc32,len
+// (timestamp decimal, path as staged, crc32 8-hex, len decimal). The bootloader
+// appends a row after each verified commit, and on an attempt-rollback re-flashes
+// the *previous* row's image (the last good firmware) instead of GOLDEN.
+#define OTA_COMMITS_CSV_PATH "/ota/commits.csv"
+#define OTA_COMMITS_CSV_HEADER "timestamp,path,crc32,len"
 
 typedef enum {
       OTA_ARM_OK = 0,
@@ -52,13 +65,14 @@ extern "C" {
 #endif
 
 // Stage the Intel-HEX at `sd_path` for commit into slot A on the next reset:
-// compute its CRC32/length, write /ota/pending.txt, and set the ota_pending flag.
-// Does NOT reboot. Returns OTA_ARM_OK on success.
-ota_arm_result_t ota_arm_update(const char* sd_path);
+// compute its CRC32/length, write /ota/pending.txt (recording `unix_time` as the
+// commit timestamp), and set the ota_pending flag. Pass 0 for unix_time if the
+// caller has no wall clock. Does NOT reboot. Returns OTA_ARM_OK on success.
+ota_arm_result_t ota_arm_update(const char* sd_path, uint32_t unix_time);
 
 // Stage `sd_path` (as ota_arm_update) and, on success, immediately reset the chip
 // so the bootloader commits it. Returns only on failure (with the arm result).
-ota_arm_result_t ota_arm_update_and_reboot(const char* sd_path);
+ota_arm_result_t ota_arm_update_and_reboot(const char* sd_path, uint32_t unix_time);
 
 // Clear any pending update (the ota_pending flag). The /ota/pending.txt file and
 // the staged hex are left in place.

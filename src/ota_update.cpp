@@ -36,7 +36,7 @@ void file_crc_len(File& f, uint32_t* crc_out, uint32_t* len_out) {
 
 } // namespace
 
-ota_arm_result_t ota_arm_update(const char* sd_path) {
+ota_arm_result_t ota_arm_update(const char* sd_path, uint32_t unix_time) {
       if (!SD.begin(BUILTIN_SDCARD)) return OTA_ARM_SD_ERR;
 
       File f = SD.open(sd_path, FILE_READ);
@@ -55,6 +55,7 @@ ota_arm_result_t ota_arm_update(const char* sd_path) {
       d.printf("%s\n", sd_path);
       d.printf("%08lX\n", (unsigned long)crc);
       d.printf("%lu\n", (unsigned long)len);
+      d.printf("%lu\n", (unsigned long)unix_time); // commit timestamp for the history
       d.close();
 
       // Flip the boot-control flag the bootloader acts on next reset.
@@ -65,8 +66,8 @@ ota_arm_result_t ota_arm_update(const char* sd_path) {
       return OTA_ARM_OK;
 }
 
-ota_arm_result_t ota_arm_update_and_reboot(const char* sd_path) {
-      const ota_arm_result_t r = ota_arm_update(sd_path);
+ota_arm_result_t ota_arm_update_and_reboot(const char* sd_path, uint32_t unix_time) {
+      const ota_arm_result_t r = ota_arm_update(sd_path, unix_time);
       if (r != OTA_ARM_OK) return r;
       ota_reboot();
       return r; // unreachable

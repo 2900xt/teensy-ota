@@ -118,10 +118,11 @@ void setup() {
       // rollback. Defaults (target=A, attempts=0) if blank/torn.
       ota_boot_state_t st;
       ota_boot_state_load(&st);
-      Serial.printf("boot-control: target=%s attempts=%u/%u healthy=%u pending=%u last_commit=%u\n\r",
-                    st.boot_target == OTA_BOOT_TARGET_GOLDEN ? "GOLDEN" : "A",
-                    st.slotA_attempts, OTA_BOOT_MAX_ATTEMPTS, st.slotA_healthy, st.ota_pending,
-                    st.last_commit_result);
+      Serial.printf(
+          "boot-control: target=%s attempts=%u/%u healthy=%u pending=%u last_commit=%u reverted=%u\n\r",
+          st.boot_target == OTA_BOOT_TARGET_GOLDEN ? "GOLDEN" : "A", st.slotA_attempts,
+          OTA_BOOT_MAX_ATTEMPTS, st.slotA_healthy, st.ota_pending, st.last_commit_result,
+          st.slotA_reverted);
 
       // Apply a pending SD-staged update before slot selection. The app only
       // stages a hex on the SD and sets ota_pending; the bootloader is the only
@@ -137,6 +138,7 @@ void setup() {
                   // counter so the fresh slot A gets a normal rollback-protected run.
                   st.slotA_attempts = 0;
                   st.slotA_healthy = 0;
+                  st.slotA_reverted = 0; // a new image re-arms one revert step
                   st.boot_target = OTA_BOOT_TARGET_A;
                   Serial.println("commit OK; boot_target=A, attempts reset");
             } else {
@@ -165,13 +167,36 @@ void setup() {
             jump_to_app(APP_SLOT_A_BASE);
       }
 
-      // Falling back to GOLDEN. If slot A is a valid target that simply burned
-      // through its attempts, make GOLDEN sticky so we stop retrying a bad image
-      // (a new OTA commit clears it). A merely invalid/blank slot A is NOT made
-      // sticky, so a future valid flash can still boot it.
+      // Slot A burned through its attempts without marking healthy. First try to
+      // revert to the PREVIOUS flashed image (re-program slot A from the SD commit
+      // history) and give that a fresh rollback-protected run; only if that revert
+      // is unavailable or itself fails do we fall back to the GOLDEN failsafe. The
+      // slotA_reverted flag makes this one-shot: a recovery image that ALSO fails
+      // its attempts goes straight to GOLDEN instead of reverting again.
       if (st.boot_target == OTA_BOOT_TARGET_A && st.slotA_attempts >= OTA_BOOT_MAX_ATTEMPTS) {
-            Serial.printf("slot A reached %u attempts without mark_healthy; rolling back to GOLDEN\n\r",
-                          OTA_BOOT_MAX_ATTEMPTS);
+            if (!st.slotA_reverted) {
+                  Serial.printf("slot A reached %u attempts; reverting to previous image\n\r",
+                                OTA_BOOT_MAX_ATTEMPTS);
+                  const ota_commit_result_t rr = ota_revert_to_previous(Serial);
+                  if (rr == OTA_COMMIT_OK) {
+                        // Re-arm slot A for the restored image and reboot so the
+                        // normal boot path arms the watchdog and jumps into it.
+                        st.slotA_reverted = 1;
+                        st.slotA_attempts = 0;
+                        st.slotA_healthy = 0;
+                        st.boot_target = OTA_BOOT_TARGET_A;
+                        ota_boot_state_save(&st);
+                        Serial.println("revert OK; rebooting into restored slot A...");
+                        Serial.flush();
+                        delay(50);
+                        SCB_AIRCR = 0x05FA0004u; // VECTKEY | SYSRESETREQ
+                        while (true) {}
+                  }
+                  Serial.printf("revert failed (result=%u); falling back to GOLDEN\n\r", rr);
+            } else {
+                  Serial.println("recovery image also failed its attempts; falling back to GOLDEN");
+            }
+            // Make GOLDEN sticky so we stop retrying (a new OTA commit clears it).
             st.boot_target = OTA_BOOT_TARGET_GOLDEN;
             ota_boot_state_save(&st);
       } else if (st.boot_target == OTA_BOOT_TARGET_GOLDEN) {

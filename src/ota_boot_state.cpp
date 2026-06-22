@@ -26,7 +26,7 @@ void ota_boot_state_default(ota_boot_state_t* s) {
       s->slotA_healthy = 0;
       s->ota_pending = 0;
       s->last_commit_result = OTA_COMMIT_NONE;
-      s->reserved = 0;
+      s->slotA_reverted = 0;
       s->crc32 = 0; // stamped by ota_boot_state_save()
 }
 

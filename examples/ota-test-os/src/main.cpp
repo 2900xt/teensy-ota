@@ -10,8 +10,9 @@
  *
  * It is also a normal slot-A citizen of the rollback safety net: it feeds the
  * watchdog every loop (ota_boot_keepalive) and marks itself healthy once stable
- * (ota_mark_healthy), so committing a broken image and rolling back to GOLDEN can
- * be demonstrated end to end. The loop is non-blocking so the dog is always fed.
+ * (ota_mark_healthy), so committing a broken image and watching the bootloader
+ * revert to the previous flashed image (or GOLDEN as the failsafe) can be
+ * demonstrated end to end. The loop is non-blocking so the dog is always fed.
  *
  * Built three ways (see platformio.ini): standalone (teensy41), slot A
  * (teensy41_slotA), and GOLDEN (teensy41_slotB). Define TEENSY_OTA_APP_VERSION to
@@ -157,7 +158,10 @@ void cmd_commit(const char* path) {
       }
       Serial.printf("arming %s (ver=%lu, %lu bytes) and rebooting to commit...\n\r", path,
                     (unsigned long)info.version, (unsigned long)info.file_len);
-      const ota_arm_result_t r = ota_arm_update(path);
+      // Timestamp the commit from the Teensy RTC (Unix epoch; real wall-clock if a
+      // VBAT coin cell keeps it, otherwise the upload time). Logged into the commit
+      // history so the revert-to-previous path has a record to fall back on.
+      const ota_arm_result_t r = ota_arm_update(path, (uint32_t)Teensy3Clock.get());
       if (r != OTA_ARM_OK) {
             Serial.printf("arm failed (result=%d)\n\r", (int)r);
             return;

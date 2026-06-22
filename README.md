@@ -153,18 +153,25 @@ The app hands a stamped slot-A `.hex` (already on the SD card) to the bootloader
 #include "ota_update.h"
 
 ota_file_info_t info;
-ota_inspect_file("/ota/app.hex", &info);     // no-flash dry run: CRC, header, range
-ota_arm_update("/ota/app.hex");              // record pending; commit on next boot
-ota_arm_update_and_reboot("/ota/app.hex");   // arm, then reset immediately
-ota_disarm_update();                         // cancel a pending update
-ota_reboot();                                // clean SYSRESETREQ
+ota_inspect_file("/ota/app.hex", &info);          // no-flash dry run: CRC, header, range
+ota_arm_update("/ota/app.hex", now());            // record pending; commit on next boot
+ota_arm_update_and_reboot("/ota/app.hex", now()); // arm, then reset immediately
+ota_disarm_update();                              // cancel a pending update
+ota_reboot();                                     // clean SYSRESETREQ
 ```
 
-`ota_arm_update` writes `/ota/pending.txt` (staged path, file CRC32, file length) and
-sets the `ota_pending` flag. The bootloader re-verifies the file against that CRC and
-length before touching flash, so a corrupt transfer is harmless. `ota_inspect_file`
-lets a tool or UI vet an image (parse OK, valid header, every record inside slot A)
-before arming. See the header for the full `ota_file_info_t` and result codes.
+`ota_arm_update` writes `/ota/pending.txt` (staged path, file CRC32, file length, and
+a caller-supplied commit timestamp) and sets the `ota_pending` flag. The bootloader
+re-verifies the file against that CRC and length before touching flash, so a corrupt
+transfer is harmless. On a successful commit it appends a row to the commit history
+`/ota/commits.csv` (`timestamp,path,crc32,len`). `ota_inspect_file` lets a tool or UI
+vet an image (parse OK, valid header, every record inside slot A) before arming. See
+the header for the full `ota_file_info_t` and result codes.
+
+> Pass a real Unix timestamp if you have one (the example uses the Teensy RTC via
+> `Teensy3Clock.get()`); `0` is fine if you have no wall clock. Stage each image
+> under its **own** path — the revert-to-previous path re-flashes the prior image
+> straight from its SD hex, so leave committed `.hex` files in place.
 
 ---
 
@@ -180,9 +187,21 @@ is the whole point of this library:
 3. It parses the Intel-HEX, accepting **only** records inside slot A, erases slot A,
    programs it via the RAM-resident flash layer, and re-verifies the stamped image
    CRC.
-4. **On success:** clear pending, reset the attempt counter, boot slot A.
-   **On any failure:** clear pending (no commit boot-loop), set the target to GOLDEN,
-   record the result, and boot GOLDEN.
+4. **On success:** clear pending, reset the attempt counter, append the image to the
+   commit history `/ota/commits.csv`, and boot slot A.
+   **On a failed commit:** clear pending (no commit boot-loop), fall back to the
+   GOLDEN failsafe, record the result, and boot GOLDEN.
+
+### Rollback: previous image first, GOLDEN as the failsafe
+
+A committed image that boots but never marks itself healthy (crash/hang loop) burns
+through its attempt counter. Instead of jumping straight to GOLDEN, the bootloader
+**reverts to the previous flashed image**: it reads `/ota/commits.csv`, takes the row
+before the most recent, and re-programs slot A from that image's SD hex (same
+CRC-check → erase → program → verify as a commit), then reboots into it with a fresh
+attempt budget. This is one-shot — if the restored image *also* fails its attempts,
+or there is no previous image on record, or the re-flash fails, the bootloader falls
+back to the immutable **GOLDEN** recovery image. A new OTA commit re-arms the revert.
 
 The commit lives in [`bootloader/src/ota_commit.*`](bootloader/src/ota_commit.cpp);
 the Intel-HEX line decoder is shared between bootloader and app via `src/ota_hex.*`.
