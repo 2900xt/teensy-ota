@@ -1,0 +1,9 @@
+# Teensy 4.x access rules for tycmd/PlatformIO uploads.
+# Allows the logged-in user (uaccess) and members of dialout to access:
+# - normal USB serial mode (16c0:0483 -> /dev/ttyACM*)
+# - HalfKay bootloader mode (16c0:0478 -> /dev/hidraw*)
+
+SUBSYSTEM=="tty", ATTRS{idVendor}=="16c0", ATTRS{idProduct}=="0483", MODE="0660", GROUP="dialout", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="16c0", ATTRS{idProduct}=="0478", MODE="0660", GROUP="dialout", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="16c0", ATTR{idProduct}=="0478", MODE="0664", GROUP="dialout", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="16c0", ATTR{idProduct}=="0483", MODE="0664", GROUP="dialout", TAG+="uaccess"
