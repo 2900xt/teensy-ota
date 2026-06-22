@@ -49,6 +49,17 @@ make ota APP_DIR=../my-firmware  # use your firmware instead of the example
 (The Teensy loader erases the whole chip, so the bootloader and app are merged into
 one image and flashed together.)
 
+## In-place updates (OTA commit)
+
+`make flash` is a full-chip program over USB. The field-update path is different:
+the running app stages a **stamped slot-A `.hex` on the SD card** and sets a
+pending flag, and on the next reset the **bootloader itself** mounts the SD, parses
+the hex, and programs slot A in place — the app never writes flash. The staged
+file's CRC is checked before slot A is erased, so a corrupt transfer is harmless,
+and a failed or interrupted commit falls back to the immutable GOLDEN image. The
+commit lives in `bootloader/src/ota_commit.*`; the serial transfer and `OTA_ARM`
+front-ends that stage the file land in later milestones (see `OTA_PLAN.md`).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

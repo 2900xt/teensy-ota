@@ -29,6 +29,7 @@
 
 #include "app_header.h"
 #include "ota_boot_state.h"
+#include "ota_commit.h"
 #include "ota_crc32.h"
 #include "ota_wdog.h"
 #ifdef OTA_FLASH_SELFTEST
@@ -197,8 +198,36 @@ void setup() {
                     st.slotA_attempts, OTA_BOOT_MAX_ATTEMPTS, st.slotA_healthy, st.ota_pending,
                     st.last_commit_result);
 
-      // M4 will apply a pending SD-staged update here (before slot selection),
-      // clearing ota_pending and resetting the attempt counter on success.
+      // Apply a pending SD-staged update (M4) before slot selection. The running
+      // app only stages a hex on the SD and sets ota_pending; the bootloader is
+      // the only thing that ever writes slot A. The commit verifies the staged
+      // file's outer CRC before erasing, so a corrupt transfer leaves the current
+      // slot A intact; a failure after erase leaves slot A CRC-invalid and is
+      // caught below by the normal GOLDEN fallback.
+#ifdef OTA_DEMO_FORCE_PENDING
+      // Bench helper (no M5/M6 yet): force the commit path. Hand-place
+      // /ota/pending.txt + the staged slot-A hex on the SD, then reset.
+      st.ota_pending = 1;
+      Serial.println("OTA_DEMO_FORCE_PENDING: forcing ota_pending=1 for this boot");
+#endif
+      if (st.ota_pending) {
+            const ota_commit_result_t r = ota_commit_pending(Serial);
+            st.ota_pending = 0; // always clear: never re-run a commit (boot-loop)
+            st.last_commit_result = static_cast<uint8_t>(r);
+            if (r == OTA_COMMIT_OK) {
+                  // New image committed: clear any sticky GOLDEN and the attempt
+                  // counter so the fresh slot A gets a normal rollback-protected run.
+                  st.slotA_attempts = 0;
+                  st.slotA_healthy = 0;
+                  st.boot_target = OTA_BOOT_TARGET_A;
+                  Serial.println("commit OK; boot_target=A, attempts reset");
+            } else {
+                  // Failed commit: fall back to GOLDEN this boot.
+                  st.boot_target = OTA_BOOT_TARGET_GOLDEN;
+                  Serial.printf("commit failed (result=%u); falling back to GOLDEN\n\r", r);
+            }
+            ota_boot_state_save(&st);
+      }
 
       const bool a_ok = slot_bootable(APP_SLOT_A_BASE, "slot A");
 
