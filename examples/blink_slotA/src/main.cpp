@@ -53,9 +53,6 @@ void loop() {
       // Bench demo: never feed again, never mark healthy. The watchdog expires and
       // resets the chip; the un-cleared attempt counter rolls back to GOLDEN.
       while (true) {
-            delay(500);
-            Serial.println("HANGING");
-            Serial.flush();
       }
 #endif
 
