@@ -31,7 +31,7 @@ build_flags = ${env.build_flags} -D TEENSY_OTA_SLOT_BUILD
 
 `TEENSY_OTA_SLOT_BUILD` makes the library emit an `app_header` at the slot base; the
 linker script pins it there. Slot A and GOLDEN are the same firmware linked at two
-bases. A working consumer lives in [`examples/blink_slotA/`](examples/blink_slotA).
+bases. A working consumer lives in [`examples/ota-test-os/`](examples/ota-test-os).
 
 ## Build & flash
 
@@ -57,8 +57,21 @@ pending flag, and on the next reset the **bootloader itself** mounts the SD, par
 the hex, and programs slot A in place — the app never writes flash. The staged
 file's CRC is checked before slot A is erased, so a corrupt transfer is harmless,
 and a failed or interrupted commit falls back to the immutable GOLDEN image. The
-commit lives in `bootloader/src/ota_commit.*`; the serial transfer and `OTA_ARM`
-front-ends that stage the file land in later milestones (see `OTA_PLAN.md`).
+commit lives in `bootloader/src/ota_commit.*`.
+
+The app drives this through the staging API in [`src/ota_update.h`](src/ota_update.h):
+
+```c
+ota_arm_update_and_reboot("/ota/app.hex");  // commit on next boot
+ota_inspect_file("/ota/app.hex", &info);    // no-flash dry run (CRC, header, range)
+ota_disarm_update();                        // cancel a pending update
+```
+
+The bundled [`examples/ota-test-os`](examples/ota-test-os) is an interactive serial
+"tester OS" built on it — `ls`, `info`, `test <path>`, `commit <path>`, `abort` —
+that flashes any stamped hex already on the SD card. (Getting the hex *onto* the SD
+over serial is a later milestone; see [`OTA_PLAN.md`](OTA_PLAN.md).) Build a
+distinguishable image to commit with `-D TEENSY_OTA_APP_VERSION=<n>`.
 
 ## License
 

@@ -26,11 +26,8 @@
 
 #include "ota_boot_state.h" // ota_commit_result_t
 
-// Path to the pending-update descriptor on the SD card. Three positional lines:
-//   line 1: path to the staged slot-A Intel-HEX (e.g. /ota/slotA.hex)
-//   line 2: crc32 of that file's raw bytes (hex, 0x-prefixed or bare)
-//   line 3: length of that file in bytes (decimal)
-#define OTA_PENDING_TXT_PATH "/ota/pending.txt"
+// The pending-descriptor path/format (OTA_PENDING_TXT_PATH) is the contract with
+// the app-side staging API; see ota_update.h.
 
 // Apply the pending SD-staged update into slot A. Streams a human-readable
 // progress report to `log`. Returns an ota_commit_result_t: OTA_COMMIT_OK on a

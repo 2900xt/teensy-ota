@@ -2,7 +2,7 @@
 #
 # Wraps the bootloader build, the consuming app build, header stamping, hex
 # merging, and flashing into single commands. By default it drives the bundled
-# example (examples/blink_slotA); point it at your own firmware with:
+# example (examples/ota-test-os); point it at your own firmware with:
 #
 #   make ota APP_DIR=../my-firmware
 #
@@ -22,7 +22,7 @@ PIO    ?= pio
 TYCMD  ?= tycmd
 PYTHON ?= python3
 
-APP_DIR   ?= examples/blink_slotA
+APP_DIR   ?= examples/ota-test-os
 BUILD_DIR ?= build
 
 # GOLDEN (slot B) link base; must match APP_SLOT_B_BASE in src/app_header.h.

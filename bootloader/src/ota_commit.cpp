@@ -15,99 +15,18 @@
 #include "app_header.h"
 #include "ota_crc32.h"
 #include "ota_flash.h"
+#include "ota_hex.h"
+#include "ota_sd_line.h"
+#include "ota_update.h" // OTA_PENDING_TXT_PATH
 
 namespace {
 
-// Intel-HEX record types (see scripts/stamp_header.py, which mirrors this).
-constexpr uint8_t REC_DATA = 0x00;
-constexpr uint8_t REC_EOF = 0x01;
-constexpr uint8_t REC_EXT_LINEAR = 0x04;
-
 constexpr uint8_t ERASED = 0xFF; // NOR erased state; gap/tail fill for a sector.
 
-// One flash sector assembled in RAM before being programmed, and a single hex
-// text line. File-scope statics (no heap): a data record holds <=255 bytes, so a
-// 600-byte line covers the longest possible record (':' + 2*(255+5) + CR/LF).
+// One flash sector assembled in RAM before being programmed. File-scope static
+// (no heap): also doubles as the scratch buffer for the outer-CRC pre-pass.
 uint8_t g_sector[OTA_FLASH_SECTOR_SIZE];
-char g_line[600];
-
-// --- small SD helpers ------------------------------------------------------
-
-// Block-buffered reader over an open File, so the hex parse and the CRC pre-pass
-// don't pay a per-byte SD-cache round trip.
-class FileReader {
- public:
-      explicit FileReader(File& f) : f_(f) {}
-
-      // Next byte, or -1 at EOF.
-      int next() {
-            if (i_ >= n_) {
-                  const int r = f_.read(buf_, sizeof(buf_));
-                  if (r <= 0) return -1;
-                  n_ = r;
-                  i_ = 0;
-            }
-            return buf_[i_++];
-      }
-
- private:
-      File& f_;
-      uint8_t buf_[512];
-      int n_ = 0;
-      int i_ = 0;
-};
-
-// Read one line (up to but not including '\n') into `out`, stripping a trailing
-// '\r'. Returns the length, 0 for a blank line, or -1 at EOF with no data, or
-// -2 if the line would overflow `cap`.
-int read_line(FileReader& r, char* out, int cap) {
-      int len = 0;
-      int c = r.next();
-      if (c < 0) return -1; // clean EOF
-      while (c >= 0 && c != '\n') {
-            if (len >= cap - 1) return -2;
-            out[len++] = static_cast<char>(c);
-            c = r.next();
-      }
-      if (len > 0 && out[len - 1] == '\r') len--;
-      out[len] = '\0';
-      return len;
-}
-
-int hex_nibble(char c) {
-      if (c >= '0' && c <= '9') return c - '0';
-      if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-      if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-      return -1;
-}
-
-// Decode an Intel-HEX line (':' + hex byte pairs) into raw bytes, validating the
-// trailing checksum. Returns the decoded byte count, or -1 if malformed. The
-// caller interprets bytes[0]=count, [1..2]=offset, [3]=rectype, payload, [last]=cksum.
-int decode_record(const char* line, uint8_t* bytes, int cap) {
-      if (line[0] != ':') return -1;
-      int n = 0;
-      const char* p = line + 1;
-      while (p[0] && p[1]) {
-            const int hi = hex_nibble(p[0]);
-            const int lo = hex_nibble(p[1]);
-            if (hi < 0 || lo < 0) return -1;
-            if (n >= cap) return -1;
-            bytes[n++] = static_cast<uint8_t>((hi << 4) | lo);
-            p += 2;
-      }
-      if (p[0]) return -1;  // odd number of hex chars
-      if (n < 5) return -1; // count + addr(2) + type + checksum
-      const uint8_t count = bytes[0];
-      if (n != count + 5) return -1; // declared length must match
-      uint8_t sum = 0;
-      for (int i = 0; i < n - 1; i++) sum = static_cast<uint8_t>(sum + bytes[i]);
-      const uint8_t cksum = static_cast<uint8_t>((-static_cast<int>(sum)) & 0xFF);
-      if (cksum != bytes[n - 1]) return -1;
-      return n;
-}
-
-// --- sector-buffered programmer -------------------------------------------
+char g_line[600]; // one hex text line (longest record + CR/LF)
 
 // Streams bytes (in non-descending address order) into 4 KiB sector buffers and
 // programs each sector to flash exactly once. The whole slot is pre-erased, so
@@ -202,10 +121,9 @@ ota_commit_result_t ota_commit_pending(Stream& log) {
       char crc_line[64];
       char len_line[64];
       {
-            FileReader dr(desc);
-            if (read_line(dr, path, sizeof(path)) <= 0 ||
-                read_line(dr, crc_line, sizeof(crc_line)) <= 0 ||
-                read_line(dr, len_line, sizeof(len_line)) <= 0) {
+            OtaFileReader dr(desc);
+            if (dr.line(path, sizeof(path)) <= 0 || dr.line(crc_line, sizeof(crc_line)) <= 0 ||
+                dr.line(len_line, sizeof(len_line)) <= 0) {
                   log.println("  commit: malformed pending.txt");
                   desc.close();
                   return OTA_COMMIT_SD_ERR;
@@ -229,8 +147,7 @@ ota_commit_result_t ota_commit_pending(Stream& log) {
             uint32_t count = 0;
             for (;;) {
                   const int r = hex.read(g_sector, sizeof(g_sector));
-                  if (r < 0) break;
-                  if (r == 0) break;
+                  if (r <= 0) break;
                   crc = ota_crc32_update(crc, g_sector, static_cast<uint32_t>(r));
                   count += static_cast<uint32_t>(r);
             }
@@ -258,15 +175,16 @@ ota_commit_result_t ota_commit_pending(Stream& log) {
             hex.close();
             return OTA_COMMIT_SD_ERR;
       }
-      FileReader hr(hex);
+      OtaFileReader hr(hex);
       SectorWriter writer(log);
-      uint32_t upper = 0; // ext-linear upper 16 bits
-      uint8_t rec[256 + 5];
+      ota_hex_t hx;
+      ota_hex_init(&hx);
+      uint8_t rec[OTA_HEX_MAX_DATA];
       bool saw_eof = false;
       ota_commit_result_t result = OTA_COMMIT_OK;
 
       for (;;) {
-            const int ll = read_line(hr, g_line, sizeof(g_line));
+            const int ll = hr.line(g_line, sizeof(g_line));
             if (ll == -1) break; // EOF
             if (ll == -2) {
                   log.println("  commit: hex line too long");
@@ -275,28 +193,23 @@ ota_commit_result_t ota_commit_pending(Stream& log) {
             }
             if (ll == 0) continue; // blank line
 
-            const int n = decode_record(g_line, rec, sizeof(rec));
-            if (n < 0) {
+            uint8_t type = 0, len = 0;
+            uint32_t addr = 0;
+            if (ota_hex_parse_line(&hx, g_line, &type, &addr, rec, &len) != OTA_HEX_OK) {
                   log.println("  commit: bad hex record");
                   result = OTA_COMMIT_PARSE_ERR;
                   break;
             }
-            const uint8_t count = rec[0];
-            const uint16_t offset = static_cast<uint16_t>((rec[1] << 8) | rec[2]);
-            const uint8_t rectype = rec[3];
 
-            if (rectype == REC_EXT_LINEAR) {
-                  upper = (static_cast<uint32_t>(rec[4]) << 8) | rec[5];
-            } else if (rectype == REC_DATA) {
-                  const uint32_t addr = (upper << 16) | offset;
-                  if (addr < APP_SLOT_A_BASE || (addr + count) > APP_SLOT_B_BASE) {
+            if (type == OTA_HEX_REC_DATA) {
+                  if (addr < APP_SLOT_A_BASE || (addr + len) > APP_SLOT_B_BASE) {
                         log.printf("  commit: record @ %08lX out of slot A; aborting\n\r",
                                    static_cast<unsigned long>(addr));
                         result = OTA_COMMIT_PARSE_ERR;
                         break;
                   }
-                  for (uint8_t i = 0; i < count; i++) {
-                        const int e = writer.put(addr + i, rec[4 + i]);
+                  for (uint8_t i = 0; i < len; i++) {
+                        const int e = writer.put(addr + i, rec[i]);
                         if (e == -1) {
                               log.println("  commit: non-ascending hex record; aborting");
                               result = OTA_COMMIT_PARSE_ERR;
@@ -306,7 +219,7 @@ ota_commit_result_t ota_commit_pending(Stream& log) {
                         if (result != OTA_COMMIT_OK) break;
                   }
                   if (result != OTA_COMMIT_OK) break;
-            } else if (rectype == REC_EOF) {
+            } else if (type == OTA_HEX_REC_EOF) {
                   saw_eof = true;
                   break;
             }

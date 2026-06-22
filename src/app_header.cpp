@@ -25,12 +25,19 @@
 
 extern "C" void ResetHandler(void);
 
+// The firmware version stamped into the header. Defaults to 1; a consuming build
+// can override it (e.g. -D TEENSY_OTA_APP_VERSION=2) to make successive images
+// distinguishable — handy for confirming an OTA commit actually took effect.
+#ifndef TEENSY_OTA_APP_VERSION
+#define TEENSY_OTA_APP_VERSION 1
+#endif
+
 __attribute__((section(".appheader"), used)) const app_header_t app_header = {
     APP_HEADER_MAGIC,
     reinterpret_cast<uint32_t>(&ResetHandler),
     0, // img_len  (populated by the OTA pipeline later)
     0, // crc32    (populated by the OTA pipeline later)
-    1, // version
+    TEENSY_OTA_APP_VERSION,
 };
 
 #endif // TEENSY_OTA_SLOT_BUILD
