@@ -3,21 +3,18 @@
  * SPDX-License-Identifier: MIT
  *
  * Application-facing OTA staging API. A running slot-A app uses this to hand a
- * firmware image to the bootloader for commit: it points at a stamped slot-A
- * Intel-HEX already on the SD card, and the bootloader programs it into slot A on
- * the next reset (see bootloader/src/ota_commit.*). The app itself never writes
- * the app flash slot.
+ * firmware image to the bootloader: it points at a stamped slot-A Intel-HEX on
+ * the SD card, and the bootloader programs it into slot A on the next reset (see
+ * bootloader/src/ota_commit.*). The app itself never writes the app flash slot.
  *
- * Mechanism: `ota_arm_update` records the staged file's path, CRC32 and length in
- * the pending descriptor `/ota/pending.txt`, then sets the `ota_pending` flag in
- * the boot-control state (ota_boot_state.h). On the next boot the bootloader sees
- * the flag, re-verifies the file against that CRC/length before erasing slot A,
- * and commits it. `ota_inspect_file` is a no-flash dry run that reports what an
- * image looks like (CRC/length, header, address range) so a tool/UI can vet a
- * file before arming it.
+ * `ota_arm_update` records the file's path, CRC32 and length in the pending
+ * descriptor `/ota/pending.txt` and sets the `ota_pending` flag (ota_boot_state.h);
+ * the bootloader re-verifies the file against that CRC/length before erasing slot
+ * A. `ota_inspect_file` is a no-flash dry run that reports what an image looks
+ * like (CRC/length, header, address range) so a tool/UI can vet it before arming.
  *
- * The pending-descriptor path and format here are the cross-component contract
- * with the bootloader commit path; keep them in sync.
+ * The pending-descriptor path/format is a cross-component contract with the
+ * bootloader commit path; keep them in sync.
  */
 #ifndef TEENSY_OTA_UPDATE_H
 #define TEENSY_OTA_UPDATE_H

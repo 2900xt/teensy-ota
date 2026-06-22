@@ -2,14 +2,10 @@
  * Copyright (c) 2026 Taha Rawjani
  * SPDX-License-Identifier: MIT
  *
- * Block-buffered text-line reader over an open SD `File`, shared by the
- * bootloader commit path and the app-side inspect API. Reading an Intel-HEX file
- * byte-by-byte through SdFat's cache is slow; this refills a 512-byte buffer and
- * hands out lines, which is all the hex parsing needs.
- *
- * Header-only (and pulls in <SD.h>) so both the library and the bootloader can
- * use it without an extra translation unit; it is only included by the two
- * source files that already depend on the SD library.
+ * Block-buffered text-line reader over an open SD `File`, shared by the bootloader
+ * commit path and the app-side inspect API. Reading a hex file byte-by-byte
+ * through SdFat's cache is slow; this refills a 512-byte buffer and hands out
+ * lines. Header-only so both the library and the bootloader can use it.
  */
 #ifndef TEENSY_OTA_SD_LINE_H
 #define TEENSY_OTA_SD_LINE_H

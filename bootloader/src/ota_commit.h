@@ -2,22 +2,20 @@
  * Copyright (c) 2026 Taha Rawjani
  * SPDX-License-Identifier: MIT
  *
- * OTA commit (M4): apply a staged firmware update into slot A, inside the
- * bootloader, before slot selection. The running application never writes flash;
- * it only stages a hex file on the SD card and sets the ota_pending flag (M5/M6,
- * or the OTA_DEMO_FORCE_PENDING bench hook). On the next reset the bootloader
- * mounts the SD, reads /ota/pending.txt, and programs slot A from the staged
- * Intel-HEX.
+ * OTA commit: apply a staged firmware update into slot A, inside the bootloader,
+ * before slot selection. The running application never writes flash; it only
+ * stages a hex file on the SD card and sets the ota_pending flag. On the next
+ * reset the bootloader mounts the SD, reads /ota/pending.txt, and programs slot A
+ * from the staged Intel-HEX.
  *
  * Safety ordering: the staged file's outer CRC (recorded in pending.txt) is
- * verified BEFORE slot A is erased, so a corrupt transfer never touches flash
- * and the existing image stays bootable. Only once the file passes its integrity
- * check do we erase + program + re-verify the stamped image CRC. A failure after
- * the erase leaves slot A CRC-invalid, which the normal boot path already handles
- * by falling back to GOLDEN.
+ * verified BEFORE slot A is erased, so a corrupt transfer never touches flash.
+ * Only then do we erase + program + re-verify the stamped image CRC. A failure
+ * after the erase leaves slot A CRC-invalid, which the boot path handles by
+ * falling back to GOLDEN.
  *
- * This lives in the bootloader project (not the shared library src/) so the SD
- * library is never pulled into consuming application builds.
+ * Lives in the bootloader project (not the shared library src/) so the SD library
+ * is never pulled into consuming application builds.
  */
 #ifndef TEENSY_OTA_COMMIT_H
 #define TEENSY_OTA_COMMIT_H

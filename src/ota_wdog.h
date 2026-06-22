@@ -2,23 +2,19 @@
  * Copyright (c) 2026 Taha Rawjani
  * SPDX-License-Identifier: MIT
  *
- * Rollback watchdog (M3) on the i.MX RT1062 WDOG1.
+ * Rollback watchdog on the i.MX RT1062 WDOG1.
  *
- * Role in the OTA safety net: the bootloader arms WDOG1 immediately before it
- * jumps into a freshly-booted slot-A image. The jump is a branch, not a reset, so
- * the running watchdog spans the handoff. If the new image hangs before it proves
- * itself (never reaching ota_mark_healthy() / never feeding the dog), WDOG1 resets
- * the chip; because the boot-attempt counter was already incremented and never
- * cleared, the bootloader rolls back to GOLDEN after OTA_BOOT_MAX_ATTEMPTS. This
- * catches hangs; outright faults are caught separately by the core fault handler
- * rebooting (and CrashReport).
+ * The bootloader arms WDOG1 just before it jumps (branches, not resets) into a
+ * freshly-booted slot-A image, so the running watchdog spans the handoff. If the
+ * new image hangs before proving itself (never feeding the dog / never reaching
+ * ota_mark_healthy()), WDOG1 resets the chip; the attempt counter was already
+ * incremented, so after OTA_BOOT_MAX_ATTEMPTS the bootloader rolls back to GOLDEN.
+ * (Outright faults are caught separately by the core fault handler + CrashReport.)
  *
- * WDOG1's enable bit (WDE) is write-once: once the bootloader sets it, software
- * cannot clear it until the next reset. So a slot-A app that has been armed MUST
- * keep the dog fed for as long as it runs — call ota_wdog_feed() (the app-facing
- * alias is ota_boot_keepalive()) periodically, comfortably inside the timeout.
- * ota_mark_healthy() clears the rollback *counter* but does not — cannot — stop
- * the watchdog; feeding it remains the app's job.
+ * WDE is write-once: once armed, software cannot disable the dog until reset, so
+ * an armed slot-A app MUST keep feeding it (ota_wdog_feed(), aliased as
+ * ota_boot_keepalive()) for as long as it runs. ota_mark_healthy() clears the
+ * rollback counter but cannot stop the watchdog.
  */
 #ifndef TEENSY_OTA_WDOG_H
 #define TEENSY_OTA_WDOG_H

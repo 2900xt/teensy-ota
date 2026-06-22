@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Taha Rawjani
  * SPDX-License-Identifier: MIT
  *
- * OTA commit (M4) — see ota_commit.h. Mounts the SD card, reads the pending
+ * OTA commit — see ota_commit.h. Mounts the SD card, reads the pending
  * descriptor, verifies the staged hex's outer CRC, then erases and programs
  * slot A from the Intel-HEX and re-verifies the stamped image CRC.
  */
@@ -71,32 +71,16 @@ class SectorWriter {
       bool have_ = false;
 };
 
-// Re-verify slot A exactly as the boot path does: magic, entry in slot, in-range
-// img_len, stamped CRC. Returns true iff the freshly programmed image is bootable.
+// Re-verify slot A exactly as the boot path does (shared check: magic, entry,
+// img_len, stamped CRC). Returns true iff the freshly programmed image is bootable.
 bool verify_slot_a(Stream& log) {
+      if (!ota_slot_bootable(APP_SLOT_A_BASE)) {
+            log.println("  commit: verify failed (slot A not bootable)");
+            return false;
+      }
       const app_header_t* hdr = reinterpret_cast<const app_header_t*>(APP_SLOT_A_BASE);
-      if (hdr->magic != APP_HEADER_MAGIC) {
-            log.println("  commit: verify failed (bad magic)");
-            return false;
-      }
-      if (hdr->entry < APP_SLOT_A_BASE || hdr->entry >= (APP_SLOT_A_BASE + APP_SLOT_SIZE)) {
-            log.println("  commit: verify failed (entry out of slot)");
-            return false;
-      }
-      const uint32_t img_len = hdr->img_len;
-      if (img_len < sizeof(app_header_t) || img_len > APP_SLOT_SIZE) {
-            log.println("  commit: verify failed (img_len out of range)");
-            return false;
-      }
-      const uint32_t got = ota_app_image_crc(APP_SLOT_A_BASE, img_len);
-      if (got != hdr->crc32) {
-            log.printf("  commit: verify failed (crc %08lX != %08lX)\n\r",
-                       static_cast<unsigned long>(got),
-                       static_cast<unsigned long>(hdr->crc32));
-            return false;
-      }
       log.printf("  commit: verify OK (img_len=%lu crc=%08lX ver=%lu)\n\r",
-                 static_cast<unsigned long>(img_len), static_cast<unsigned long>(got),
+                 static_cast<unsigned long>(hdr->img_len), static_cast<unsigned long>(hdr->crc32),
                  static_cast<unsigned long>(hdr->version));
       return true;
 }

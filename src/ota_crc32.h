@@ -2,18 +2,13 @@
  * Copyright (c) 2026 Taha Rawjani
  * SPDX-License-Identifier: MIT
  *
- * CRC32 for the OTA image-integrity contract (M1). This is the standard
- * IEEE 802.3 / zlib CRC32 (reflected, polynomial 0xEDB88320, init 0xFFFFFFFF,
- * final XOR 0xFFFFFFFF) so the host-side stamping tool (stamp_header.py, which
- * uses Python's zlib.crc32) and the on-device bootloader compute bit-identical
- * values over the same bytes.
+ * CRC32 for the OTA image-integrity contract. Standard IEEE 802.3 / zlib CRC32
+ * (reflected, poly 0xEDB88320, init/xor 0xFFFFFFFF) so the host stamper
+ * (stamp_header.py, Python's zlib.crc32) and the device compute identical values.
  *
- * `ota_app_image_crc()` implements the exact convention agreed in OTA_PLAN.md:
- * the CRC covers [slot_base, slot_base + img_len) with the 4-byte crc32 field of
- * the app_header (at offset offsetof(app_header_t, crc32)) treated as zero. The
- * stamping tool zeroes that field before computing, so the bootloader must do
- * the same when it recomputes — hence this shared helper rather than a raw CRC
- * over the literal flash bytes.
+ * `ota_app_image_crc()` covers [slot_base, slot_base + img_len) with the
+ * app_header's 4-byte crc32 field treated as zero — matching what the stamper
+ * does before computing — so the bootloader recomputes the same value.
  */
 #ifndef TEENSY_OTA_CRC32_H
 #define TEENSY_OTA_CRC32_H
@@ -38,6 +33,12 @@ static inline uint32_t ota_crc32_final(uint32_t crc) { return crc ^ 0xFFFFFFFFu;
 // region directly from memory-mapped flash; `img_len` must already be bounded by
 // the caller to the slot size before calling.
 uint32_t ota_app_image_crc(uint32_t slot_base, uint32_t img_len);
+
+// True (1) iff the slot at `slot_base` holds a bootable image: valid magic, an
+// entry pointing inside the slot, an in-range img_len, and a stamped CRC that
+// matches. The single source of truth for "is this slot good", shared by the
+// boot path and the commit re-verify.
+int ota_slot_bootable(uint32_t slot_base);
 
 #ifdef __cplusplus
 }

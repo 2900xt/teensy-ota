@@ -11,8 +11,8 @@
  * valid image is present and where to begin execution.
  *
  * `magic`/`entry` drive the boot handoff; `img_len`/`crc32` are stamped post-build
- * by stamp_header.py and verified by the bootloader before every jump (M1, see
- * ota_crc32). `version` is carried for the later rollback/slot-selection logic.
+ * by stamp_header.py and verified by the bootloader before every jump (see
+ * ota_crc32); `version` feeds rollback/slot selection.
  */
 #ifndef TEENSY_OTA_APP_HEADER_H
 #define TEENSY_OTA_APP_HEADER_H

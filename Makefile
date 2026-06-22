@@ -4,7 +4,7 @@
 # merging, and flashing into single commands. By default it drives the bundled
 # example (examples/ota-test-os); point it at your own firmware with:
 #
-#   make ota APP_DIR=../my-firmware
+#   make flash APP_DIR=../my-firmware
 #
 # Common targets:
 #   make manufacturing  bootloader + slot-A app + GOLDEN slot-B  -> build/manufacturing.hex

@@ -2,27 +2,13 @@
  * Copyright (c) 2026 Taha Rawjani
  * SPDX-License-Identifier: MIT
  *
- * OTA boot prototype - resident bootloader.
- *
- * Goal of this prototype: prove the handoff. The ROM boots this image at
- * 0x60000000; it then branches into an application linked at the slot base
- * 0x60040000 and lets the app's own (unmodified) Teensy startup take over.
- *
- * Identification by LED (USB CDC re-enumerates across the jump, so the blink
- * pattern is the reliable signal):
- *   bootloader present  -> 3 fast blinks before jumping
- *   no valid app        -> slow 1 Hz heartbeat (stays in bootloader)
- *   app running          -> distinct double-blink (see the app's own main.cpp)
- *
- * Dual-slot selection (M2): the bootloader boots slot A when it holds a valid,
- * CRC-verified image, and otherwise falls back to the immutable GOLDEN image in
- * slot B. GOLDEN is directly bootable — recovery needs no flashing and no SD. The
- * richer boot-target / attempt-counter / rollback policy lands in M3; here the
- * rule is simply "good slot A, else good GOLDEN, else stay in bootloader."
- *
- * This bootloader is application-agnostic: it boots whichever firmware is linked
- * into the slots, so the same binary serves any Teensy firmware that builds
- * `*_slotA` / `*_slotB` images.
+ * Resident bootloader. The ROM boots this image at 0x60000000; it applies any
+ * pending SD-staged update, then boots slot A (the OTA-updatable image) when it
+ * is the chosen target and holds a valid, CRC-verified image, otherwise falls
+ * back to the immutable GOLDEN image in slot B. Attempt-counted rollback (a
+ * slot-A image that crashes/hangs without marking itself healthy) reverts to
+ * GOLDEN. Application-agnostic: it boots whichever firmware is linked into the
+ * slots, so the same binary serves any firmware that builds `*_slotA`/`*_slotB`.
  */
 #include <Arduino.h>
 #include <limits.h>
@@ -32,13 +18,6 @@
 #include "ota_commit.h"
 #include "ota_crc32.h"
 #include "ota_wdog.h"
-#ifdef OTA_FLASH_SELFTEST
-#include "ota_flash_selftest.h"
-#endif
-
-// Slot span (APP_SLOT_SIZE, from app_header.h; matches both app_slotA.ld and
-// app_slotB.ld FLASH LENGTH). Used to bound img_len before the CRC walk so a
-// corrupt header can never make us read past the slot.
 
 namespace {
 
@@ -51,10 +30,9 @@ void blink(int n, int on_ms, int off_ms) {
       }
 }
 
-// Tear down everything the bootloader started, then branch to the app's
-// ResetHandler. The app's startup is `naked`: it reconfigures FlexRAM, sets its
-// own stack pointer, re-copies ITCM/DATA from its slot, and installs its own
-// vector table. So we only have to hand over a quiet machine and jump.
+// Hand over a quiet machine and branch to the app's ResetHandler. The app's
+// startup reconfigures FlexRAM, sets its own stack, re-copies ITCM/DATA, and
+// installs its own vector table, so we only have to stop what we started.
 [[noreturn]] void jump_to_app(uint32_t slot_base) {
       const app_header_t* hdr = reinterpret_cast<const app_header_t*>(slot_base);
       const uint32_t entry = hdr->entry; // ResetHandler, Thumb bit already set
@@ -94,52 +72,16 @@ void blink(int n, int on_ms, int off_ms) {
       while (true) {} // unreachable
 }
 
-// Validate the app_header + stamped CRC at a slot base, streaming a one-line
-// report under `name`. Returns true iff the slot holds a bootable image: valid
-// magic, an entry pointing inside the slot, an in-range img_len, and a CRC that
-// matches the stamped value. Used for both slot A and GOLDEN slot B.
+// Validate a slot via the shared check (magic, entry, img_len, stamped CRC) and
+// log a one-line verdict under `name`. Used for both slot A and GOLDEN slot B.
 bool slot_bootable(uint32_t slot_base, const char* name) {
       const app_header_t* hdr = reinterpret_cast<const app_header_t*>(slot_base);
-      Serial.printf("%s @ %08lX  magic=%08lX  entry=%08lX  ver=%lu\n\r", name,
+      const bool ok = ota_slot_bootable(slot_base);
+      Serial.printf("%s @ %08lX magic=%08lX ver=%lu -> %s\n\r", name,
                     static_cast<unsigned long>(slot_base),
                     static_cast<unsigned long>(hdr->magic),
-                    static_cast<unsigned long>(hdr->entry),
-                    static_cast<unsigned long>(hdr->version));
-
-      if (hdr->magic != APP_HEADER_MAGIC) {
-            Serial.printf("  %s: no valid app image (bad magic)\n\r", name);
-            return false;
-      }
-
-      // Sanity: entry must point into this slot.
-      if (hdr->entry < slot_base || hdr->entry >= (slot_base + APP_SLOT_SIZE)) {
-            Serial.printf("  %s: entry out of slot range; refusing\n\r", name);
-            return false;
-      }
-
-      // Integrity: verify the stamped CRC32. img_len and crc32 are written by
-      // stamp_header.py post-build; an un-stamped image (img_len == 0) fails here.
-      // Bound img_len to the slot first so a bad header can't walk the CRC out of
-      // the slot.
-      const uint32_t img_len = hdr->img_len;
-      if (img_len < sizeof(app_header_t) || img_len > APP_SLOT_SIZE) {
-            Serial.printf("  %s: img_len=%lu out of range [%u, %lu]; refusing\n\r", name,
-                          static_cast<unsigned long>(img_len),
-                          static_cast<unsigned>(sizeof(app_header_t)),
-                          static_cast<unsigned long>(APP_SLOT_SIZE));
-            return false;
-      }
-      const uint32_t want = hdr->crc32;
-      const uint32_t got = ota_app_image_crc(slot_base, img_len);
-      Serial.printf("  %s: img_len=%lu crc=%08lX (expected %08lX)\n\r", name,
-                    static_cast<unsigned long>(img_len),
-                    static_cast<unsigned long>(got),
-                    static_cast<unsigned long>(want));
-      if (got != want) {
-            Serial.printf("  %s: CRC mismatch; refusing\n\r", name);
-            return false;
-      }
-      return true;
+                    static_cast<unsigned long>(hdr->version), ok ? "bootable" : "invalid");
+      return ok;
 }
 
 } // namespace
@@ -150,29 +92,21 @@ void setup() {
       const uint32_t t0 = millis();
       while (!Serial && (millis() - t0) < 1500) {}
 
-      Serial.println("=== OTA BOOT POC :: BOOTLOADER (0x60000000) ===");
+      Serial.println("=== teensy-ota bootloader (0x60000000) ===");
 
-      // If the app faulted last boot, Teensy stashed a crash record (at
-      // 0x2027FF80) that survives the reset. Decode it so we can see exactly
-      // what killed the handed-off app (fault type + faulting address).
+      // If the app faulted last boot, Teensy stashed a crash record that survives
+      // the reset. Decode it so we can see what killed the handed-off app.
       if (CrashReport) {
-            Serial.println("---- last fault (decoded from previous boot) ----");
+            Serial.println("---- last fault (previous boot) ----");
             Serial.print(CrashReport);
-            Serial.println("------------------------------------------------");
+            Serial.println("------------------------------------");
       }
-
-#ifdef OTA_FLASH_SELFTEST
-      // Bring-up only: prove the RAM-resident flash layer against a scratch
-      // sector in the free region before trusting it to write the app slot.
-      ota_flash_selftest(Serial);
-#endif
 
       blink(3, 80, 80);
 
       // Reset-source decode: WDOG1_WRSR latches why the chip last reset. TOUT means
-      // the rollback watchdog fired (a hung slot-A app), which is the definitive
-      // signal that the M3 hang path worked. Read with the gate on (it is enabled in
-      // ota_wdog_arm, but ensure it here for a cold boot that never armed).
+      // the rollback watchdog fired (a hung slot-A app). Enable the clock gate so
+      // the register reads on a cold boot that never armed the dog.
       CCM_CCGR3 |= CCM_CCGR3_WDOG1(CCM_CCGR_ON);
       const uint16_t wrsr = WDOG1_WRSR;
       Serial.printf("reset source (WDOG1_WRSR=%04X): %s%s%s\n\r", wrsr,
@@ -180,36 +114,20 @@ void setup() {
                     (wrsr & WDOG_WRSR_TOUT) ? "WATCHDOG-TIMEOUT " : "",
                     (wrsr & WDOG_WRSR_SFTW) ? "software " : "");
 
-      // Boot-control state (M3): persisted in emulated EEPROM, drives attempt-
-      // counted rollback. Defaults (target=A, attempts=0) if blank/torn.
+      // Boot-control state: persisted in emulated EEPROM, drives attempt-counted
+      // rollback. Defaults (target=A, attempts=0) if blank/torn.
       ota_boot_state_t st;
       ota_boot_state_load(&st);
-#ifdef OTA_RESET_BOOT_STATE
-      // Bench helper: force the boot-control state back to defaults (target=A,
-      // attempts=0, not sticky-GOLDEN). A raw tycmd upload preserves the emulated
-      // EEPROM, so without this a prior rollback leaves boot_target=GOLDEN stuck.
-      // Flash once with this defined to clear state, then rebuild without it.
-      ota_boot_state_default(&st);
-      ota_boot_state_save(&st);
-      Serial.println("OTA_RESET_BOOT_STATE: boot-control cleared to defaults (target=A, attempts=0)");
-#endif
       Serial.printf("boot-control: target=%s attempts=%u/%u healthy=%u pending=%u last_commit=%u\n\r",
                     st.boot_target == OTA_BOOT_TARGET_GOLDEN ? "GOLDEN" : "A",
                     st.slotA_attempts, OTA_BOOT_MAX_ATTEMPTS, st.slotA_healthy, st.ota_pending,
                     st.last_commit_result);
 
-      // Apply a pending SD-staged update (M4) before slot selection. The running
-      // app only stages a hex on the SD and sets ota_pending; the bootloader is
-      // the only thing that ever writes slot A. The commit verifies the staged
-      // file's outer CRC before erasing, so a corrupt transfer leaves the current
-      // slot A intact; a failure after erase leaves slot A CRC-invalid and is
-      // caught below by the normal GOLDEN fallback.
-#ifdef OTA_DEMO_FORCE_PENDING
-      // Bench helper (no M5/M6 yet): force the commit path. Hand-place
-      // /ota/pending.txt + the staged slot-A hex on the SD, then reset.
-      st.ota_pending = 1;
-      Serial.println("OTA_DEMO_FORCE_PENDING: forcing ota_pending=1 for this boot");
-#endif
+      // Apply a pending SD-staged update before slot selection. The app only
+      // stages a hex on the SD and sets ota_pending; the bootloader is the only
+      // thing that writes slot A. The commit verifies the staged file's outer CRC
+      // before erasing, so a corrupt transfer leaves slot A intact; a failure
+      // after erase leaves slot A CRC-invalid and is caught by the GOLDEN fallback.
       if (st.ota_pending) {
             const ota_commit_result_t r = ota_commit_pending(Serial);
             st.ota_pending = 0; // always clear: never re-run a commit (boot-loop)
@@ -231,11 +149,10 @@ void setup() {
 
       const bool a_ok = slot_bootable(APP_SLOT_A_BASE, "slot A");
 
-      // Boot slot A only if it is the chosen target, still has attempts left, and
-      // holds a valid image. Arm rollback before the jump: increment the persisted
-      // attempt counter (so a crash/hang that never reaches ota_mark_healthy()
-      // leaves the increment behind) and start the watchdog, which spans the
-      // branch into the app and resets the chip if the app hangs.
+      // Boot slot A only if it is the target, has attempts left, and is valid.
+      // Arm rollback before the jump: bump the persisted attempt counter (so a
+      // crash/hang that never reaches ota_mark_healthy() leaves it incremented)
+      // and start the watchdog, which spans the branch and resets a hung app.
       if (st.boot_target == OTA_BOOT_TARGET_A && st.slotA_attempts < OTA_BOOT_MAX_ATTEMPTS && a_ok) {
             st.slotA_attempts++;
             ota_boot_state_save(&st);
@@ -248,10 +165,10 @@ void setup() {
             jump_to_app(APP_SLOT_A_BASE);
       }
 
-      // Falling back to GOLDEN. If slot A is the target and a valid image but has
-      // simply burned through its attempts, make GOLDEN sticky so we stop retrying
-      // a bad image; a new OTA commit (M4) clears this. A merely invalid/blank
-      // slot A is NOT made sticky, so a future valid flash can boot it.
+      // Falling back to GOLDEN. If slot A is a valid target that simply burned
+      // through its attempts, make GOLDEN sticky so we stop retrying a bad image
+      // (a new OTA commit clears it). A merely invalid/blank slot A is NOT made
+      // sticky, so a future valid flash can still boot it.
       if (st.boot_target == OTA_BOOT_TARGET_A && st.slotA_attempts >= OTA_BOOT_MAX_ATTEMPTS) {
             Serial.printf("slot A reached %u attempts without mark_healthy; rolling back to GOLDEN\n\r",
                           OTA_BOOT_MAX_ATTEMPTS);

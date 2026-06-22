@@ -41,9 +41,9 @@ wraps the build → stamp → merge → flash pipeline and drives the example by
 pass `APP_DIR=<path>` for your own firmware.
 
 ```sh
-make flash                       # build + stamp + merge + upload bootloader test image
-make manufacturing               # + GOLDEN slot B -> build/manufacturing.hex
-make ota APP_DIR=../my-firmware  # use your firmware instead of the example
+make flash                         # build + stamp + merge + upload the manufacturing image
+make manufacturing                 # build only -> build/manufacturing.hex
+make flash APP_DIR=../my-firmware  # use your firmware instead of the example
 ```
 
 (The Teensy loader erases the whole chip, so the bootloader and app are merged into
@@ -70,8 +70,8 @@ ota_disarm_update();                        // cancel a pending update
 The bundled [`examples/ota-test-os`](examples/ota-test-os) is an interactive serial
 "tester OS" built on it — `ls`, `info`, `test <path>`, `commit <path>`, `abort` —
 that flashes any stamped hex already on the SD card. (Getting the hex *onto* the SD
-over serial is a later milestone; see [`OTA_PLAN.md`](OTA_PLAN.md).) Build a
-distinguishable image to commit with `-D TEENSY_OTA_APP_VERSION=<n>`.
+over serial is out of scope here.) Build a distinguishable image to commit with
+`-D TEENSY_OTA_APP_VERSION=<n>`.
 
 ## License
 

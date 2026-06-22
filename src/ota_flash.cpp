@@ -7,7 +7,6 @@
 #include "ota_flash.h"
 
 #include <Arduino.h>
-#include <string.h>
 
 // Core primitives (cores/teensy4/eeprom.c). They are FASTRUN (ITCM), disable
 // IRQs across the program/erase command, purge the D-cache, and wait for the
@@ -22,18 +21,12 @@ void eepromemu_flash_erase_64K_block(void* addr);
 
 namespace {
 
-// Fully contained in [base, end)? Caller has already ruled out len==0 / wraparound.
-bool in_range(uint32_t addr, uint32_t len, uint32_t base, uint32_t end) {
-      return addr >= base && (addr + len) <= end;
-}
-
+// Fully contained in slot A? Rejects len==0 and wraparound. Anything outside
+// slot A (bootloader, GOLDEN, EEPROM) is not writable.
 bool in_writable_window(uint32_t addr, uint32_t len) {
       if (len == 0) return false;
       if (addr + len < addr) return false; // wraparound
-      // Must fall entirely within ONE of the two disjoint ranges; a span that
-      // crosses GOLDEN (slot A -> spare) is rejected, which is what we want.
-      return in_range(addr, len, OTA_FLASH_SLOTA_BASE, OTA_FLASH_SLOTA_END) ||
-             in_range(addr, len, OTA_FLASH_SPARE_BASE, OTA_FLASH_SPARE_END);
+      return addr >= OTA_FLASH_SLOTA_BASE && (addr + len) <= OTA_FLASH_SLOTA_END;
 }
 
 } // namespace
@@ -76,21 +69,6 @@ FASTRUN int ota_flash_write(uint32_t addr, const void* src, uint32_t len) {
             addr += chunk;
             p += chunk;
             len -= chunk;
-      }
-      return OTA_FLASH_OK;
-}
-
-int ota_flash_verify(uint32_t addr, const void* src, uint32_t len) {
-      // The program/erase primitives purge the D-cache over their target, so a
-      // plain compare against the memory-mapped flash sees post-write data.
-      if (memcmp(reinterpret_cast<const void*>(addr), src, len) != 0) { return OTA_FLASH_ERR_VERIFY; }
-      return OTA_FLASH_OK;
-}
-
-int ota_flash_is_erased(uint32_t addr, uint32_t len) {
-      const uint8_t* f = reinterpret_cast<const uint8_t*>(addr);
-      for (uint32_t i = 0; i < len; i++) {
-            if (f[i] != 0xFF) return OTA_FLASH_ERR_VERIFY;
       }
       return OTA_FLASH_OK;
 }

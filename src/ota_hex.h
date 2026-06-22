@@ -2,15 +2,12 @@
  * Copyright (c) 2026 Taha Rawjani
  * SPDX-License-Identifier: MIT
  *
- * Streaming Intel-HEX line decoder, shared by the bootloader commit path
- * (bootloader/src/ota_commit.cpp) and the app-side staging/inspect API
- * (ota_update.cpp). It decodes one text line at a time and tracks the running
- * type-04 extended-linear-address so a sequence of lines yields absolute byte
- * addresses. The caller owns reading lines from wherever the hex lives (an SD
- * File, a serial stream, ...); this module is pure C with no I/O dependency.
- *
- * The record format and checksum match scripts/stamp_header.py, so a hex emitted
- * by that tool round-trips here bit-for-bit.
+ * Streaming Intel-HEX line decoder, shared by the bootloader commit path and the
+ * app-side staging/inspect API. Decodes one text line at a time and tracks the
+ * running type-04 extended-linear-address so a sequence of lines yields absolute
+ * byte addresses. The caller owns reading lines (SD File, serial, ...); this
+ * module is pure C with no I/O dependency. Record format/checksum match
+ * scripts/stamp_header.py, so its output round-trips here bit-for-bit.
  */
 #ifndef TEENSY_OTA_HEX_H
 #define TEENSY_OTA_HEX_H

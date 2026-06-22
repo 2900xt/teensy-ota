@@ -2,18 +2,16 @@
  * Copyright (c) 2026 Taha Rawjani
  * SPDX-License-Identifier: MIT
  *
- * teensy-ota example: a small interactive "tester OS" over the USB serial
- * console that drives the OTA staging API (ota_update.h). It lets you point at a
- * stamped slot-A Intel-HEX already sitting on the SD card and either inspect it
- * (a no-flash dry run) or commit it — which arms the update and resets, so the
- * bootloader programs it into slot A on the next boot. Serial file transfer is a
- * later milestone; for now the .hex is placed on the SD by other means.
+ * teensy-ota example: a small interactive "tester OS" over the USB serial console
+ * that drives the OTA staging API (ota_update.h). Point it at a stamped slot-A
+ * Intel-HEX already on the SD card and either inspect it (no-flash dry run) or
+ * commit it — which arms the update and resets, so the bootloader programs slot A
+ * on the next boot. (Getting the .hex onto the SD is out of scope here.)
  *
- * It is also a normal slot-A citizen of the M3 rollback safety net: it feeds the
- * rollback watchdog every loop (ota_boot_keepalive) and marks itself healthy
- * after running stably (ota_mark_healthy), so committing a broken image and
- * having it roll back to GOLDEN can be demonstrated end to end. The whole loop is
- * non-blocking so the watchdog is always fed while waiting for a command.
+ * It is also a normal slot-A citizen of the rollback safety net: it feeds the
+ * watchdog every loop (ota_boot_keepalive) and marks itself healthy once stable
+ * (ota_mark_healthy), so committing a broken image and rolling back to GOLDEN can
+ * be demonstrated end to end. The loop is non-blocking so the dog is always fed.
  *
  * Built three ways (see platformio.ini): standalone (teensy41), slot A
  * (teensy41_slotA), and GOLDEN (teensy41_slotB). Define TEENSY_OTA_APP_VERSION to

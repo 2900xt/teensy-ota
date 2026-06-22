@@ -57,3 +57,15 @@ uint32_t ota_app_image_crc(uint32_t slot_base, uint32_t img_len) {
       }
       return ota_crc32_final(crc);
 }
+
+int ota_slot_bootable(uint32_t slot_base) {
+      const app_header_t* h = (const app_header_t*)(uintptr_t)slot_base;
+      if (h->magic != APP_HEADER_MAGIC) return 0;
+      // Entry must point inside the slot.
+      if (h->entry < slot_base || h->entry >= slot_base + APP_SLOT_SIZE) return 0;
+      // Bound img_len to the slot before the CRC walk so a bad header can't read
+      // past the slot. img_len/crc32 are stamped post-build; an un-stamped image
+      // (img_len == 0) fails here.
+      if (h->img_len < sizeof(app_header_t) || h->img_len > APP_SLOT_SIZE) return 0;
+      return ota_app_image_crc(slot_base, h->img_len) == h->crc32;
+}

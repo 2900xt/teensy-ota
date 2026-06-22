@@ -2,8 +2,8 @@
  * Copyright (c) 2026 Taha Rawjani
  * SPDX-License-Identifier: MIT
  *
- * Application-facing OTA boot API (M3). This is the small surface a slot-A
- * firmware uses to participate in the rollback safety net:
+ * Application-facing OTA boot API. The small surface a slot-A firmware uses to
+ * participate in the rollback safety net:
  *
  *   - call ota_boot_keepalive() regularly (e.g. once per loop) to feed the
  *     rollback watchdog the bootloader armed across the handoff; and
