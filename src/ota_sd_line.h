@@ -2,19 +2,25 @@
  * Copyright (c) 2026 Taha Rawjani
  * SPDX-License-Identifier: MIT
  *
- * Block-buffered text-line reader over an open SD `File`, shared by the bootloader
+ * Block-buffered text-line reader over an open SD file, shared by the bootloader
  * commit path and the app-side inspect API. Reading a hex file byte-by-byte
  * through SdFat's cache is slow; this refills a 512-byte buffer and hands out
  * lines. Header-only so both the library and the bootloader can use it.
+ *
+ * Templated on the file type (anything exposing `int read(void*, size_t)`) so it
+ * works equally with the Arduino `SD` wrapper's `File` (bootloader) and SdFat's
+ * `FsFile` opened off an application-owned mount (app side). Instantiate
+ * explicitly at the call site, e.g. `OtaFileReader<FsFile> rd(f);`.
  */
 #ifndef TEENSY_OTA_SD_LINE_H
 #define TEENSY_OTA_SD_LINE_H
 
-#include <SD.h>
+#include <stddef.h>
+#include <stdint.h>
 
-class OtaFileReader {
+template <class FileT> class OtaFileReader {
  public:
-      explicit OtaFileReader(File& f) : f_(f) {}
+      explicit OtaFileReader(FileT& f) : f_(f) {}
 
       // Next byte, or -1 at EOF.
       int next() {
@@ -45,7 +51,7 @@ class OtaFileReader {
       }
 
  private:
-      File& f_;
+      FileT& f_;
       uint8_t buf_[512];
       int n_ = 0;
       int i_ = 0;

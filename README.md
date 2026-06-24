@@ -153,10 +153,14 @@ The app hands a stamped slot-A `.hex` (already on the SD card) to the bootloader
 #include "ota_update.h"
 
 ota_file_info_t info;
-ota_inspect_file("/ota/hex/app.hex", &info);          // no-flash dry run: CRC, header, range
-ota_arm_update("/ota/hex/app.hex", now());            // record pending; commit on next boot
-ota_arm_update_and_reboot("/ota/hex/app.hex", now()); // arm, then reset immediately
-ota_disarm_update();                                  // cancel a pending update
+// `sd` is the caller's already-mounted SdFs (e.g. the app's own mount, or the
+// Arduino SD wrapper's `SD.sdfs`). These calls never mount/unmount the card
+// themselves — mounting it a second time would reset the SDIO controller out
+// from under the caller's open file handles.
+ota_inspect_file(sd, "/ota/hex/app.hex", &info);          // no-flash dry run: CRC, header, range
+ota_arm_update(sd, "/ota/hex/app.hex", now());            // record pending; commit on next boot
+ota_arm_update_and_reboot(sd, "/ota/hex/app.hex", now()); // arm, then reset immediately
+ota_disarm_update();                                      // cancel a pending update
 ota_reboot();                                         // clean SYSRESETREQ
 ```
 

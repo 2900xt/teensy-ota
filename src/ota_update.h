@@ -31,6 +31,15 @@
 #define OTA_HEX_DIR "/ota/hex"
 #define OTA_HEX_DIR_PREFIX "/ota/hex/"
 
+#ifdef __cplusplus
+// The staging calls operate on a filesystem the caller already mounted (see the
+// SdFs& parameter below) rather than mounting their own. This is deliberate:
+// these run inside a live application that owns a single SdFs over the one SDIO
+// card, and a second mount of the same card (the old SD.begin(BUILTIN_SDCARD))
+// would reset the controller and corrupt the caller's open log/status handles.
+#include <SdFat.h>
+#endif
+
 // Pending-update descriptor on the SD card. Four positional lines:
 //   line 1: path to the staged slot-A Intel-HEX, under OTA_HEX_DIR (e.g. /ota/hex/app.hex)
 //   line 2: CRC32 of that file's raw bytes (hex)
@@ -51,7 +60,7 @@
 typedef enum {
       OTA_ARM_OK = 0,
       OTA_ARM_NOT_FOUND = 1, // the staged file does not exist on the SD card
-      OTA_ARM_SD_ERR = 2,    // SD mount, read, or pending.txt write failed
+      OTA_ARM_SD_ERR = 2,    // staged file unreadable/empty, or pending.txt write failed
       OTA_ARM_BAD_PATH = 3,  // the staged file is not under OTA_HEX_DIR (/ota/hex/)
 } ota_arm_result_t;
 
@@ -70,26 +79,29 @@ typedef struct {
 } ota_file_info_t;
 
 #ifdef __cplusplus
-extern "C" {
-#endif
-
 // Stage the Intel-HEX at `sd_path` for commit into slot A on the next reset:
 // compute its CRC32/length, write /ota/pending.txt (recording `unix_time` as the
 // commit timestamp), and set the ota_pending flag. Pass 0 for unix_time if the
-// caller has no wall clock. Does NOT reboot. Returns OTA_ARM_OK on success.
-ota_arm_result_t ota_arm_update(const char* sd_path, uint32_t unix_time);
+// caller has no wall clock. `sd` must be an already-mounted filesystem over the
+// SD card (the app's own SdFs); this call neither mounts nor unmounts it. Does
+// NOT reboot. Returns OTA_ARM_OK on success.
+ota_arm_result_t ota_arm_update(SdFs& sd, const char* sd_path, uint32_t unix_time);
 
 // Stage `sd_path` (as ota_arm_update) and, on success, immediately reset the chip
 // so the bootloader commits it. Returns only on failure (with the arm result).
-ota_arm_result_t ota_arm_update_and_reboot(const char* sd_path, uint32_t unix_time);
+ota_arm_result_t ota_arm_update_and_reboot(SdFs& sd, const char* sd_path, uint32_t unix_time);
+
+// No-flash dry run: read `sd_path` (on the already-mounted `sd`) and fill `out`.
+// Returns 0 if the file could be read (inspect `out` for validity), non-zero if
+// the file could not be opened.
+int ota_inspect_file(SdFs& sd, const char* sd_path, ota_file_info_t* out);
+
+extern "C" {
+#endif
 
 // Clear any pending update (the ota_pending flag). The /ota/pending.txt file and
-// the staged hex are left in place.
+// the staged hex are left in place. Backed by the emulated EEPROM, not the SD card.
 void ota_disarm_update(void);
-
-// No-flash dry run: read `sd_path` and fill `out`. Returns 0 if the file could be
-// read (inspect `out` for validity), non-zero if the SD/file could not be opened.
-int ota_inspect_file(const char* sd_path, ota_file_info_t* out);
 
 // Software reset via the Cortex-M AIRCR (SYSRESETREQ). Does not return.
 void ota_reboot(void);

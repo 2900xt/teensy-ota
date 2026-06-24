@@ -124,7 +124,9 @@ void cmd_info() {
 
 void cmd_test(const char* path) {
       ota_file_info_t info;
-      if (ota_inspect_file(path, &info) != 0) {
+      // SD.sdfs is the Arduino SD wrapper's underlying SdFat mount; the OTA staging
+      // calls operate on it rather than mounting the card a second time.
+      if (ota_inspect_file(SD.sdfs, path, &info) != 0) {
             Serial.printf("cannot read '%s' (SD mounted? path correct?)\n\r", path);
             return;
       }
@@ -149,7 +151,7 @@ void cmd_test(const char* path) {
 void cmd_commit(const char* path) {
       // Vet the file first so we don't reboot into a guaranteed rollback.
       ota_file_info_t info;
-      if (ota_inspect_file(path, &info) != 0) {
+      if (ota_inspect_file(SD.sdfs, path, &info) != 0) {
             Serial.printf("cannot read '%s'\n\r", path);
             return;
       }
@@ -162,7 +164,7 @@ void cmd_commit(const char* path) {
       // Timestamp the commit from the Teensy RTC (Unix epoch; real wall-clock if a
       // VBAT coin cell keeps it, otherwise the upload time). Logged into the commit
       // history so the revert-to-previous path has a record to fall back on.
-      const ota_arm_result_t r = ota_arm_update(path, (uint32_t)Teensy3Clock.get());
+      const ota_arm_result_t r = ota_arm_update(SD.sdfs, path, (uint32_t)Teensy3Clock.get());
       if (r == OTA_ARM_BAD_PATH) {
             Serial.println("refusing: flash images must live under " OTA_HEX_DIR "/");
             return;

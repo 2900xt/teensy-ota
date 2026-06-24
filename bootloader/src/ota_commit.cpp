@@ -142,7 +142,7 @@ ota_commit_result_t commit_hex_file(const char* path, uint32_t want_crc, uint32_
             hex.close();
             return OTA_COMMIT_SD_ERR;
       }
-      OtaFileReader hr(hex);
+      OtaFileReader<File> hr(hex);
       SectorWriter writer(log);
       ota_hex_t hx;
       ota_hex_init(&hx);
@@ -267,7 +267,7 @@ ota_commit_result_t ota_commit_pending(Stream& log) {
       char ts_line[64];
       uint32_t ts = 0;
       {
-            OtaFileReader dr(desc);
+            OtaFileReader<File> dr(desc);
             if (dr.line(path, sizeof(path)) <= 0 || dr.line(crc_line, sizeof(crc_line)) <= 0 ||
                 dr.line(len_line, sizeof(len_line)) <= 0) {
                   log.println("  commit: malformed pending.txt");
@@ -313,7 +313,7 @@ ota_commit_result_t ota_revert_to_previous(Stream& log) {
       uint32_t prev_crc = 0, prev_len = 0;
       bool have_prev = false;
       {
-            OtaFileReader rd(h);
+            OtaFileReader<File> rd(h);
             char cur_path[256] = {0};
             uint32_t cur_crc = 0, cur_len = 0;
             bool have_cur = false;
