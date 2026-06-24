@@ -23,8 +23,16 @@
 
 #include <stdint.h>
 
+// The only folder the bootloader will flash an Intel-HEX from. Every staged image
+// (a pending commit and every revert from the commit history) MUST live under this
+// directory; the bootloader rejects any other path before it touches flash. The
+// bootloader creates the folder on boot, so a staged hex belongs at e.g.
+// `/ota/hex/app.hex`. Trailing slash included so it composes as a path prefix.
+#define OTA_HEX_DIR "/ota/hex"
+#define OTA_HEX_DIR_PREFIX "/ota/hex/"
+
 // Pending-update descriptor on the SD card. Four positional lines:
-//   line 1: path to the staged slot-A Intel-HEX (e.g. /ota/app.hex)
+//   line 1: path to the staged slot-A Intel-HEX, under OTA_HEX_DIR (e.g. /ota/hex/app.hex)
 //   line 2: CRC32 of that file's raw bytes (hex)
 //   line 3: length of that file in bytes (decimal)
 //   line 4: caller-supplied commit timestamp (decimal; Unix epoch seconds, 0 if
@@ -44,6 +52,7 @@ typedef enum {
       OTA_ARM_OK = 0,
       OTA_ARM_NOT_FOUND = 1, // the staged file does not exist on the SD card
       OTA_ARM_SD_ERR = 2,    // SD mount, read, or pending.txt write failed
+      OTA_ARM_BAD_PATH = 3,  // the staged file is not under OTA_HEX_DIR (/ota/hex/)
 } ota_arm_result_t;
 
 // Result of a no-flash inspect of a staged hex (ota_inspect_file).

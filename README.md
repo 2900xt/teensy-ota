@@ -54,24 +54,24 @@ that is why `make flash` builds the full image rather than slot A alone.
 ### Try an OTA update
 
 1. Build a second, distinguishable slot-A image and copy it to the SD card under
-   `/ota` (e.g. `/ota/app.hex`):
+   `/ota/hex` — the only folder the bootloader will flash from (e.g. `/ota/hex/app.hex`):
 
    ```sh
    pio run -d examples/ota-test-os -e teensy41_slotA \
      -DTEENSY_OTA_APP_VERSION=2
    python3 scripts/stamp_header.py \
      examples/ota-test-os/.pio/build/teensy41_slotA/firmware.hex
-   # copy that firmware.hex to the card as /ota/app.hex
+   # copy that firmware.hex to the card as /ota/hex/app.hex
    ```
 
 2. Open the serial console (`make test`, or any 115200-baud terminal) and use the
    tester OS:
 
    ```
-   > ls                 # list *.hex in /ota
-   > test /ota/app.hex  # no-flash dry run: CRC, header, address range
-   > commit /ota/app.hex # arm + reboot; the bootloader flashes slot A
-   > info                # confirm running version flipped to 2
+   > ls                     # list *.hex in /ota/hex
+   > test /ota/hex/app.hex  # no-flash dry run: CRC, header, address range
+   > commit /ota/hex/app.hex # arm + reboot; the bootloader flashes slot A
+   > info                    # confirm running version flipped to 2
    ```
 
    `commit` arms the update and reboots. The bootloader verifies the file's CRC
@@ -153,15 +153,18 @@ The app hands a stamped slot-A `.hex` (already on the SD card) to the bootloader
 #include "ota_update.h"
 
 ota_file_info_t info;
-ota_inspect_file("/ota/app.hex", &info);          // no-flash dry run: CRC, header, range
-ota_arm_update("/ota/app.hex", now());            // record pending; commit on next boot
-ota_arm_update_and_reboot("/ota/app.hex", now()); // arm, then reset immediately
-ota_disarm_update();                              // cancel a pending update
-ota_reboot();                                     // clean SYSRESETREQ
+ota_inspect_file("/ota/hex/app.hex", &info);          // no-flash dry run: CRC, header, range
+ota_arm_update("/ota/hex/app.hex", now());            // record pending; commit on next boot
+ota_arm_update_and_reboot("/ota/hex/app.hex", now()); // arm, then reset immediately
+ota_disarm_update();                                  // cancel a pending update
+ota_reboot();                                         // clean SYSRESETREQ
 ```
 
-`ota_arm_update` writes `/ota/pending.txt` (staged path, file CRC32, file length, and
-a caller-supplied commit timestamp) and sets the `ota_pending` flag. The bootloader
+Staged images **must** live under `/ota/hex/` — the bootloader creates that folder on
+boot and refuses to flash a hex from anywhere else, and `ota_arm_update` rejects an
+out-of-folder path up front with `OTA_ARM_BAD_PATH`. `ota_arm_update` writes
+`/ota/pending.txt` (staged path, file CRC32, file length, and a caller-supplied commit
+timestamp) and sets the `ota_pending` flag. The bootloader
 re-verifies the file against that CRC and length before touching flash, so a corrupt
 transfer is harmless. On a successful commit it appends a row to the commit history
 `/ota/commits.csv` (`timestamp,path,crc32,len`). `ota_inspect_file` lets a tool or UI

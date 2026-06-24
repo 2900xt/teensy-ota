@@ -92,6 +92,16 @@ bool verify_slot_a(Stream& log) {
 // pending-commit and the revert-to-previous paths.
 ota_commit_result_t commit_hex_file(const char* path, uint32_t want_crc, uint32_t want_len,
                                     Stream& log) {
+      // 0. Source-folder lock: only flash images that live under OTA_HEX_DIR. This
+      //    is the authoritative gate — both the pending commit and every revert
+      //    flow through here, so nothing reaches flash from outside /ota/hex/. FAT
+      //    is case-insensitive, so the prefix match is too.
+      if (strncasecmp(path, OTA_HEX_DIR_PREFIX, sizeof(OTA_HEX_DIR_PREFIX) - 1) != 0) {
+            log.printf("  commit: staged hex %s is not under %s; refusing\n\r", path,
+                       OTA_HEX_DIR_PREFIX);
+            return OTA_COMMIT_SD_ERR;
+      }
+
       // 1. Outer integrity check on the staged file, BEFORE touching flash: if the
       //    transfer is corrupt we abort here and the current slot A survives.
       File hex = SD.open(path, FILE_READ);

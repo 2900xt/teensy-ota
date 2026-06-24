@@ -90,17 +90,18 @@ void cmd_ls() {
             Serial.println("SD not mounted");
             return;
       }
-      File dir = SD.open("/ota");
+      File dir = SD.open(OTA_HEX_DIR);
       if (!dir || !dir.isDirectory()) {
-            Serial.println("no /ota directory on SD");
+            Serial.println("no " OTA_HEX_DIR " directory on SD");
             if (dir) dir.close();
             return;
       }
-      Serial.println("hex files in /ota:");
+      Serial.println("hex files in " OTA_HEX_DIR ":");
       int count = 0;
       for (File e = dir.openNextFile(); e; e = dir.openNextFile()) {
             if (!e.isDirectory() && ends_with_hex(e.name())) {
-                  Serial.printf("  /ota/%s  (%lu bytes)\n\r", e.name(), (unsigned long)e.size());
+                  Serial.printf("  " OTA_HEX_DIR "/%s  (%lu bytes)\n\r", e.name(),
+                                (unsigned long)e.size());
                   count++;
             }
             e.close();
@@ -162,6 +163,10 @@ void cmd_commit(const char* path) {
       // VBAT coin cell keeps it, otherwise the upload time). Logged into the commit
       // history so the revert-to-previous path has a record to fall back on.
       const ota_arm_result_t r = ota_arm_update(path, (uint32_t)Teensy3Clock.get());
+      if (r == OTA_ARM_BAD_PATH) {
+            Serial.println("refusing: flash images must live under " OTA_HEX_DIR "/");
+            return;
+      }
       if (r != OTA_ARM_OK) {
             Serial.printf("arm failed (result=%d)\n\r", (int)r);
             return;

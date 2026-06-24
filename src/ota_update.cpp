@@ -37,6 +37,11 @@ void file_crc_len(File& f, uint32_t* crc_out, uint32_t* len_out) {
 } // namespace
 
 ota_arm_result_t ota_arm_update(const char* sd_path, uint32_t unix_time) {
+      // The bootloader only flashes images under OTA_HEX_DIR; reject anything else
+      // here so the caller gets a clear error instead of a failed commit next boot.
+      if (strncasecmp(sd_path, OTA_HEX_DIR_PREFIX, sizeof(OTA_HEX_DIR_PREFIX) - 1) != 0)
+            return OTA_ARM_BAD_PATH;
+
       if (!SD.begin(BUILTIN_SDCARD)) return OTA_ARM_SD_ERR;
 
       File f = SD.open(sd_path, FILE_READ);
@@ -47,8 +52,10 @@ ota_arm_result_t ota_arm_update(const char* sd_path, uint32_t unix_time) {
       if (len == 0) return OTA_ARM_SD_ERR; // empty / unreadable
 
       // Write the pending descriptor. SD's FILE_WRITE appends, so remove any old
-      // descriptor first to truncate.
+      // descriptor first to truncate. Ensure the /ota tree exists (the bootloader
+      // creates it on boot, but the app may stage before the first bootloader run).
       SD.mkdir("/ota");
+      SD.mkdir(OTA_HEX_DIR);
       SD.remove(OTA_PENDING_TXT_PATH);
       File d = SD.open(OTA_PENDING_TXT_PATH, FILE_WRITE);
       if (!d) return OTA_ARM_SD_ERR;

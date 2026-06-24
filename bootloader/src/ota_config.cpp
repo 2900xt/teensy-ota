@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "ota_sd_line.h"
+#include "ota_update.h" // OTA_HEX_DIR
 
 namespace {
 
@@ -111,13 +112,21 @@ void ota_config_load(ota_config_t* c, Stream& log) {
             return;
       }
 
-      // Self-provision: create /ota/ and a default config.txt on a fresh card so
-      // the folder the app also relies on exists from the very first boot.
+      // Self-provision the /ota tree on a fresh card so the folders the app and the
+      // commit path rely on exist from the very first boot: /ota/ for the config and
+      // descriptors, and /ota/hex/ — the only folder the bootloader will flash an
+      // Intel-HEX from (enforced in ota_commit.cpp).
       if (!SD.exists(OTA_CONFIG_DIR)) {
             if (SD.mkdir(OTA_CONFIG_DIR))
                   log.println("config: created " OTA_CONFIG_DIR " folder");
             else
                   log.println("config: WARN could not create " OTA_CONFIG_DIR " folder");
+      }
+      if (!SD.exists(OTA_HEX_DIR)) {
+            if (SD.mkdir(OTA_HEX_DIR))
+                  log.println("config: created " OTA_HEX_DIR " folder (flash-image source)");
+            else
+                  log.println("config: WARN could not create " OTA_HEX_DIR " folder");
       }
 
       if (!SD.exists(OTA_CONFIG_TXT_PATH)) {
