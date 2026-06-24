@@ -16,10 +16,15 @@
 #include "app_header.h"
 #include "ota_boot_state.h"
 #include "ota_commit.h"
+#include "ota_config.h"
 #include "ota_crc32.h"
 #include "ota_wdog.h"
 
 namespace {
+
+// Set from /ota/config.txt at the top of setup(). Gates the verbose diagnostic
+// log; key decision/jump lines print regardless.
+bool g_verbose = true;
 
 void blink(int n, int on_ms, int off_ms) {
       for (int i = 0; i < n; i++) {
@@ -77,10 +82,11 @@ void blink(int n, int on_ms, int off_ms) {
 bool slot_bootable(uint32_t slot_base, const char* name) {
       const app_header_t* hdr = reinterpret_cast<const app_header_t*>(slot_base);
       const bool ok = ota_slot_bootable(slot_base);
-      Serial.printf("%s @ %08lX magic=%08lX ver=%lu -> %s\n\r", name,
-                    static_cast<unsigned long>(slot_base),
-                    static_cast<unsigned long>(hdr->magic),
-                    static_cast<unsigned long>(hdr->version), ok ? "bootable" : "invalid");
+      if (g_verbose)
+            Serial.printf("%s @ %08lX magic=%08lX ver=%lu -> %s\n\r", name,
+                          static_cast<unsigned long>(slot_base),
+                          static_cast<unsigned long>(hdr->magic),
+                          static_cast<unsigned long>(hdr->version), ok ? "bootable" : "invalid");
       return ok;
 }
 
@@ -94,9 +100,21 @@ void setup() {
 
       Serial.println("=== teensy-ota bootloader (0x60000000) ===");
 
+      // Load tunables from /ota/config.txt (self-provisioning a default preset on a
+      // fresh card). Done first so the rest of the boot honors the configured
+      // attempts/watchdog/target and the requested log verbosity. If the SD log
+      // baud differs from the bootstrap 115200, re-open Serial at it.
+      ota_config_t cfg;
+      ota_config_load(&cfg, Serial);
+      g_verbose = cfg.verbose != 0;
+      if (cfg.serial_baud != 115200u) {
+            Serial.flush();
+            Serial.begin(cfg.serial_baud);
+      }
+
       // If the app faulted last boot, Teensy stashed a crash record that survives
       // the reset. Decode it so we can see what killed the handed-off app.
-      if (CrashReport) {
+      if (g_verbose && CrashReport) {
             Serial.println("---- last fault (previous boot) ----");
             Serial.print(CrashReport);
             Serial.println("------------------------------------");
@@ -109,20 +127,33 @@ void setup() {
       // the register reads on a cold boot that never armed the dog.
       CCM_CCGR3 |= CCM_CCGR3_WDOG1(CCM_CCGR_ON);
       const uint16_t wrsr = WDOG1_WRSR;
-      Serial.printf("reset source (WDOG1_WRSR=%04X): %s%s%s\n\r", wrsr,
-                    (wrsr & WDOG_WRSR_POR) ? "power-on " : "",
-                    (wrsr & WDOG_WRSR_TOUT) ? "WATCHDOG-TIMEOUT " : "",
-                    (wrsr & WDOG_WRSR_SFTW) ? "software " : "");
+      if (g_verbose)
+            Serial.printf("reset source (WDOG1_WRSR=%04X): %s%s%s\n\r", wrsr,
+                          (wrsr & WDOG_WRSR_POR) ? "power-on " : "",
+                          (wrsr & WDOG_WRSR_TOUT) ? "WATCHDOG-TIMEOUT " : "",
+                          (wrsr & WDOG_WRSR_SFTW) ? "software " : "");
 
       // Boot-control state: persisted in emulated EEPROM, drives attempt-counted
       // rollback. Defaults (target=A, attempts=0) if blank/torn.
       ota_boot_state_t st;
-      ota_boot_state_load(&st);
-      Serial.printf(
-          "boot-control: target=%s attempts=%u/%u healthy=%u pending=%u last_commit=%u reverted=%u\n\r",
-          st.boot_target == OTA_BOOT_TARGET_GOLDEN ? "GOLDEN" : "A", st.slotA_attempts,
-          OTA_BOOT_MAX_ATTEMPTS, st.slotA_healthy, st.ota_pending, st.last_commit_result,
-          st.slotA_reverted);
+      const bool st_valid = ota_boot_state_load(&st) != 0;
+      if (g_verbose)
+            Serial.printf(
+                "boot-control: target=%s attempts=%u/%u healthy=%u pending=%u last_commit=%u reverted=%u\n\r",
+                st.boot_target == OTA_BOOT_TARGET_GOLDEN ? "GOLDEN" : "A", st.slotA_attempts,
+                cfg.max_attempts, st.slotA_healthy, st.ota_pending, st.last_commit_result,
+                st.slotA_reverted);
+
+      // Honor the configured preferred target only when the persisted state is
+      // fresh (default-valid, nothing pending, no attempts/health/revert history):
+      // the dynamic rollback state machine otherwise owns boot_target. Local only —
+      // never persisted, so a later OTA/rollback still drives the EEPROM state.
+      if (st_valid && st.ota_pending == 0 && st.slotA_attempts == 0 && st.slotA_healthy == 0 &&
+          st.slotA_reverted == 0 && st.boot_target == OTA_BOOT_TARGET_A &&
+          cfg.boot_target == OTA_BOOT_TARGET_GOLDEN) {
+            st.boot_target = OTA_BOOT_TARGET_GOLDEN;
+            Serial.println("config: preferred target GOLDEN; booting recovery image");
+      }
 
       // Apply a pending SD-staged update before slot selection. The app only
       // stages a hex on the SD and sets ota_pending; the bootloader is the only
@@ -155,13 +186,22 @@ void setup() {
       // Arm rollback before the jump: bump the persisted attempt counter (so a
       // crash/hang that never reaches ota_mark_healthy() leaves it incremented)
       // and start the watchdog, which spans the branch and resets a hung app.
-      if (st.boot_target == OTA_BOOT_TARGET_A && st.slotA_attempts < OTA_BOOT_MAX_ATTEMPTS && a_ok) {
-            st.slotA_attempts++;
-            ota_boot_state_save(&st);
-            ota_wdog_arm(OTA_WDOG_DEFAULT_TIMEOUT_MS);
-            Serial.printf("booting slot A (attempt %u/%u), watchdog armed %u ms; jumping to %08lX...\n\r",
-                          st.slotA_attempts, OTA_BOOT_MAX_ATTEMPTS, OTA_WDOG_DEFAULT_TIMEOUT_MS,
-                          static_cast<unsigned long>(APP_SLOT_A_BASE));
+      // With rollback disabled (config) neither happens: slot A boots directly.
+      if (st.boot_target == OTA_BOOT_TARGET_A && a_ok &&
+          (!cfg.rollback_enabled || st.slotA_attempts < cfg.max_attempts)) {
+            if (cfg.rollback_enabled) {
+                  st.slotA_attempts++;
+                  ota_boot_state_save(&st);
+                  ota_wdog_arm(cfg.wdog_timeout_ms);
+                  Serial.printf(
+                      "booting slot A (attempt %u/%u), watchdog armed %lu ms; jumping to %08lX...\n\r",
+                      st.slotA_attempts, cfg.max_attempts,
+                      static_cast<unsigned long>(cfg.wdog_timeout_ms),
+                      static_cast<unsigned long>(APP_SLOT_A_BASE));
+            } else {
+                  Serial.printf("booting slot A (rollback disabled, no watchdog); jumping to %08lX...\n\r",
+                                static_cast<unsigned long>(APP_SLOT_A_BASE));
+            }
             Serial.flush();
             delay(50);
             jump_to_app(APP_SLOT_A_BASE);
@@ -173,10 +213,11 @@ void setup() {
       // is unavailable or itself fails do we fall back to the GOLDEN failsafe. The
       // slotA_reverted flag makes this one-shot: a recovery image that ALSO fails
       // its attempts goes straight to GOLDEN instead of reverting again.
-      if (st.boot_target == OTA_BOOT_TARGET_A && st.slotA_attempts >= OTA_BOOT_MAX_ATTEMPTS) {
+      if (st.boot_target == OTA_BOOT_TARGET_A && cfg.rollback_enabled &&
+          st.slotA_attempts >= cfg.max_attempts) {
             if (!st.slotA_reverted) {
                   Serial.printf("slot A reached %u attempts; reverting to previous image\n\r",
-                                OTA_BOOT_MAX_ATTEMPTS);
+                                cfg.max_attempts);
                   const ota_commit_result_t rr = ota_revert_to_previous(Serial);
                   if (rr == OTA_COMMIT_OK) {
                         // Re-arm slot A for the restored image and reboot so the

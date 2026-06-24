@@ -206,6 +206,28 @@ back to the immutable **GOLDEN** recovery image. A new OTA commit re-arms the re
 The commit lives in [`bootloader/src/ota_commit.*`](bootloader/src/ota_commit.cpp);
 the Intel-HEX line decoder is shared between bootloader and app via `src/ota_hex.*`.
 
+### Configuration — `/ota/config.txt`
+
+At the top of every boot the bootloader loads tunables from `/ota/config.txt` on
+the SD card. On a fresh card it **creates the `/ota/` folder and writes a default
+preset**, so a blank card is self-provisioning and never needs a config to boot.
+The format is `key=value`, one per line, with `#` comments; an invalid value falls
+back to that field's compiled default rather than failing the boot.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `max_attempts` | `3` | Failed slot-A boots (no `ota_mark_healthy`) before rollback. Range 1–255. |
+| `wdog_timeout_ms` | `8000` | Rollback watchdog window armed before jumping to slot A. Range 500–128000. |
+| `boot_target` | `A` | Preferred target (`A` or `GOLDEN`) when the persisted boot state is fresh. |
+| `rollback` | `1` | `0` boots the preferred target directly — no attempt counter, no watchdog. |
+| `baud` | `115200` | Baud for the bootloader's serial log. |
+| `verbose` | `1` | `0` prints only key decision/jump lines instead of the full boot log. |
+
+`boot_target` is only honored when the dynamic rollback state machine is idle (no
+pending update, no attempt/health/revert history); an in-flight OTA or rollback
+still owns the boot decision. The loader lives in
+[`bootloader/src/ota_config.*`](bootloader/src/ota_config.cpp).
+
 ---
 
 ## Reference
